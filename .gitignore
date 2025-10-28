@@ -1,0 +1,24 @@
+# Python ignores
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+ENV/
+env/
+
+# System & temp files
+.DS_Store
+Thumbs.db
+
+# Logs and outputs
+*.log
+.ipynb_checkpoints/
+
+# Allow model & data files for Render
+!model.pkl
+!features_full_daily.csv
+!XAU_USD_Historical_Data_daily.csv
+!XAU_USD_Historical_Data_weekly.csv
+!XAU_USD_Historical_Data_monthly.csv
