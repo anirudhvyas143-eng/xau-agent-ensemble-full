@@ -16,12 +16,13 @@ MODEL_FILE = Path("model.pkl")
 SIGNALS_FILE = Path("signals.json")
 HISTORY_FILE = Path("signals_history.json")
 
-# Run signal generation every 15 minutes
+# === Auto refresh every 15 minutes ===
 REFRESH_INTERVAL_SECS = 900
 
 
+# === MODEL TRAINING ===
 def train_default_model():
-    """Train a fallback dummy model using all expected features (9 total)."""
+    """Fallback dummy model (used if no CSVs found)."""
     model = RandomForestClassifier()
     dummy_features = [
         "ema21_d", "ema50_d", "atr14_d",
@@ -36,16 +37,74 @@ def train_default_model():
     return model
 
 
+def train_real_model():
+    """Train a real RandomForest model from combined daily, weekly, monthly data."""
+    try:
+        files = {
+            "daily": DAILY_FILE,
+            "weekly": WEEKLY_FILE,
+            "monthly": MONTHLY_FILE
+        }
+        data = {}
+
+        for name, file in files.items():
+            if file.exists():
+                df = pd.read_csv(file)
+                df = df.rename(columns={
+                    "ema21": f"ema21_{name[0]}",
+                    "ema50": f"ema50_{name[0]}",
+                    "atr14": f"atr14_{name[0]}"
+                })
+                df = df.reset_index(drop=True)
+                data[name] = df
+            else:
+                print(f"⚠️ Missing file: {file}")
+
+        if not data:
+            print("⚠️ No CSV data found — using fallback model.")
+            return train_default_model()
+
+        # Use daily data as base
+        base = data.get("daily", next(iter(data.values())))
+        base["target"] = (base["ema21_d"] > base["ema50_d"]).astype(int)
+
+        # Merge weekly and monthly by index
+        for name, df in data.items():
+            if name != "daily":
+                base = base.join(df[[f"ema21_{name[0]}", f"ema50_{name[0]}", f"atr14_{name[0]}"]], how="left")
+
+        feature_cols = [
+            "ema21_d", "ema50_d", "atr14_d",
+            "ema21_w", "ema50_w", "atr14_w",
+            "ema21_m", "ema50_m", "atr14_m"
+        ]
+        base = base.dropna(subset=feature_cols)
+        X = base[feature_cols]
+        y = base["target"]
+
+        model = RandomForestClassifier(n_estimators=200, random_state=42)
+        model.fit(X, y)
+        joblib.dump(model, MODEL_FILE)
+
+        print(f"✅ Real model trained successfully with {len(X)} samples.")
+        return model
+
+    except Exception as e:
+        print(f"❌ Real model training failed: {e}")
+        return train_default_model()
+
+
+# === SIGNAL GENERATION ===
 def generate_and_save_signal():
     """Generate multi-timeframe ensemble signal and save."""
     try:
         if not MODEL_FILE.exists():
-            print("⚙️ Training default model (model.pkl not found)...")
-            model = train_default_model()
+            print("⚙️ Training real model (model.pkl not found)...")
+            model = train_real_model()
         else:
             model = joblib.load(MODEL_FILE)
 
-        # === Load available timeframe data ===
+        # Load timeframe data
         data_sources = {}
         for label, file in {
             "daily": DAILY_FILE,
@@ -61,7 +120,7 @@ def generate_and_save_signal():
         if not data_sources:
             raise FileNotFoundError("No timeframe CSV files found")
 
-        # === Extract latest feature values ===
+        # Extract latest features
         def get_latest_features(df, prefix):
             return {
                 f"ema21_{prefix}": df["ema21"].iloc[-1],
@@ -71,11 +130,11 @@ def generate_and_save_signal():
 
         features = {}
         for timeframe, df in data_sources.items():
-            features.update(get_latest_features(df, timeframe[0]))  # d, w, m suffixes
+            features.update(get_latest_features(df, timeframe[0]))  # d, w, m
 
         X = pd.DataFrame([features])
 
-        # === Predict ===
+        # Predict
         prediction = model.predict(X)[0]
         prob = model.predict_proba(X)[0][prediction] if hasattr(model, "predict_proba") else 0.0
         signal = "BUY" if prediction == 1 else "SELL"
@@ -87,11 +146,11 @@ def generate_and_save_signal():
             "features_used": list(features.keys()),
         }
 
-        # === Save signal ===
+        # Save signal
         with open(SIGNALS_FILE, "w") as f:
             json.dump(response, f, indent=2)
 
-        # === Append to history ===
+        # Append to history
         history = []
         if HISTORY_FILE.exists():
             try:
@@ -116,7 +175,7 @@ def background_scheduler():
         time.sleep(REFRESH_INTERVAL_SECS)
 
 
-# === Combine multiple timeframe signals ===
+# === ENSEMBLE COMBINER ===
 def get_ensemble_signal(daily, weekly, monthly):
     signals = [daily, weekly, monthly]
     buy_count = signals.count("BUY")
@@ -130,8 +189,7 @@ def get_ensemble_signal(daily, weekly, monthly):
         return "NEUTRAL"
 
 
-# === Routes ===
-
+# === ROUTES ===
 @app.route('/')
 def home():
     return jsonify({"status": "ok", "time": str(datetime.now(timezone.utc))})
@@ -158,26 +216,22 @@ def history_api():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    """
-    Receive JSON input with daily/weekly/monthly data, return ensemble prediction.
-    Example input:
-    {
-      "daily": {"ema21": 2350, "ema50": 2348, "atr14": 14.2},
-      "weekly": {"ema21": 2360, "ema50": 2350, "atr14": 32.1},
-      "monthly": {"ema21": 2380, "ema50": 2330, "atr14": 75.0}
-    }
-    """
+    """Receive JSON input with daily/weekly/monthly data and return ensemble signal."""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "Missing JSON body"}), 400
 
-        model = joblib.load(MODEL_FILE) if MODEL_FILE.exists() else train_default_model()
+        model = joblib.load(MODEL_FILE) if MODEL_FILE.exists() else train_real_model()
 
         signals = {}
         for tf in ["daily", "weekly", "monthly"]:
             if tf in data:
-                df = pd.DataFrame([data[tf]])
+                df = pd.DataFrame([{
+                    f"ema21_{tf[0]}": data[tf]["ema21"],
+                    f"ema50_{tf[0]}": data[tf]["ema50"],
+                    f"atr14_{tf[0]}": data[tf]["atr14"]
+                }])
                 pred = model.predict(df)[0]
                 signals[tf] = "BUY" if pred == 1 else "SELL"
             else:
@@ -202,7 +256,7 @@ def predict():
 
 @app.route('/dashboard')
 def dashboard():
-    """Simple web dashboard for signal visualization."""
+    """Simple dashboard view."""
     import html
 
     latest_signal = {}
@@ -235,7 +289,7 @@ def dashboard():
             body {{
                 background-color: #0d1117;
                 color: #fff;
-                font-family: 'Arial', sans-serif;
+                font-family: Arial, sans-serif;
                 text-align: center;
                 padding-top: 40px;
             }}
@@ -303,4 +357,3 @@ def dashboard():
 if __name__ == '__main__':
     threading.Thread(target=background_scheduler, daemon=True).start()
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
-    
