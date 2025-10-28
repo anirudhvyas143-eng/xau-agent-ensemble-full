@@ -1,10 +1,10 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import pandas as pd
 import joblib
 import json, threading, time, os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-import numpy as np
+from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 
@@ -16,52 +16,31 @@ MODEL_FILE = Path("model.pkl")
 SIGNALS_FILE = Path("signals.json")
 HISTORY_FILE = Path("signals_history.json")
 
-REFRESH_INTERVAL_SECS = 900  # 15 minutes
+# Run signal generation every 15 minutes
+REFRESH_INTERVAL_SECS = 900
 
 
-# === Utility: compute EMA + ATR if missing ===
-def ensure_features(df):
-    df = df.copy()
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    df.sort_values('Date', inplace=True)
-    df.dropna(subset=['Close'], inplace=True)
-
-    if 'ema21' not in df.columns:
-        df['ema21'] = df['Close'].ewm(span=21, adjust=False).mean()
-    if 'ema50' not in df.columns:
-        df['ema50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    if 'atr14' not in df.columns:
-        df['H-L'] = df['High'] - df['Low']
-        df['H-C'] = (df['High'] - df['Close'].shift()).abs()
-        df['L-C'] = (df['Low'] - df['Close'].shift()).abs()
-        tr = df[['H-L', 'H-C', 'L-C']].max(axis=1)
-        df['atr14'] = tr.rolling(window=14).mean()
-
-    df.dropna(inplace=True)
-    return df
-
-
-def get_signal_from_trend(df):
-    """Return simple BUY/SELL based on EMA cross."""
-    if df["ema21"].iloc[-1] > df["ema50"].iloc[-1]:
-        return "BUY"
-    else:
-        return "SELL"
+def train_default_model():
+    """Train a fallback dummy model if none exists."""
+    model = RandomForestClassifier()
+    dummy_X = pd.DataFrame([[1, 2, 3]])
+    dummy_y = [1]
+    model.fit(dummy_X, dummy_y)
+    joblib.dump(model, MODEL_FILE)
+    print("✅ Default model trained.")
+    return model
 
 
 def generate_and_save_signal():
-    """Generate ensemble signal using multiple timeframes."""
+    """Generate multi-timeframe ensemble signal and save."""
     try:
-        # === Load model if exists ===
-        model = None
-        if MODEL_FILE.exists():
-            try:
-                model = joblib.load(MODEL_FILE)
-                print("✅ Loaded existing model.")
-            except Exception as e:
-                print(f"⚠️ Could not load model: {e}")
+        if not MODEL_FILE.exists():
+            print("⚙️ Training default model (model.pkl not found)...")
+            model = train_default_model()
+        else:
+            model = joblib.load(MODEL_FILE)
 
-        # === Load timeframe data ===
+        # === Load available timeframe data ===
         data_sources = {}
         for label, file in {
             "daily": DAILY_FILE,
@@ -70,7 +49,6 @@ def generate_and_save_signal():
         }.items():
             if file.exists():
                 df = pd.read_csv(file)
-                df = ensure_features(df)
                 data_sources[label] = df
             else:
                 print(f"⚠️ Missing file: {file}")
@@ -78,55 +56,37 @@ def generate_and_save_signal():
         if not data_sources:
             raise FileNotFoundError("No timeframe CSV files found")
 
-        # === Ensemble weights ===
-        weights = {"daily": 0.5, "weekly": 0.3, "monthly": 0.2}
-        votes = {"BUY": 0.0, "SELL": 0.0}
-        sub_signals = {}
+        # === Extract latest feature values ===
+        def get_latest_features(df, prefix):
+            return {
+                f"ema21_{prefix}": df["ema21"].iloc[-1],
+                f"ema50_{prefix}": df["ema50"].iloc[-1],
+                f"atr14_{prefix}": df["atr14"].iloc[-1],
+            }
 
-        # === Compute trend-based signal per timeframe ===
-        for tf, df in data_sources.items():
-            sig = get_signal_from_trend(df)
-            sub_signals[tf] = sig
-            votes[sig] += weights[tf]
+        features = {}
+        for timeframe, df in data_sources.items():
+            features.update(get_latest_features(df, timeframe[0]))  # d, w, m suffixes
 
-        # === Final ensemble signal ===
-        final_signal = "BUY" if votes["BUY"] > votes["SELL"] else "SELL"
-        confidence = round(abs(votes["BUY"] - votes["SELL"]) * 100, 2)
+        X = pd.DataFrame([features])
 
-        # === Optional model refinement ===
-        if model:
-            features = {}
-            for tf, df in data_sources.items():
-                p = tf[0]  # d, w, m
-                features.update({
-                    f"ema21_{p}": df["ema21"].iloc[-1],
-                    f"ema50_{p}": df["ema50"].iloc[-1],
-                    f"atr14_{p}": df["atr14"].iloc[-1]
-                })
-            X = pd.DataFrame([features])
-            try:
-                pred = model.predict(X)[0]
-                model_signal = "BUY" if pred == 1 else "SELL"
-                if model_signal == final_signal:
-                    confidence = min(100, confidence + 10)
-                else:
-                    confidence = max(0, confidence - 10)
-            except Exception as e:
-                print(f"⚠️ Model prediction skipped: {e}")
+        # === Predict ===
+        prediction = model.predict(X)[0]
+        prob = model.predict_proba(X)[0][prediction] if hasattr(model, "predict_proba") else 0.0
+        signal = "BUY" if prediction == 1 else "SELL"
 
-        # === Response ===
         response = {
-            "final_signal": final_signal,
-            "confidence": confidence,
-            "sub_signals": sub_signals,
-            "weights": weights,
-            "timestamp": str(datetime.utcnow()),
+            "signal": signal,
+            "confidence": round(prob * 100, 2),
+            "timestamp": str(datetime.now(timezone.utc)),
+            "features_used": list(features.keys()),
         }
 
-        # === Save files ===
+        # === Save signal ===
         with open(SIGNALS_FILE, "w") as f:
             json.dump(response, f, indent=2)
 
+        # === Append to history ===
         history = []
         if HISTORY_FILE.exists():
             try:
@@ -136,7 +96,7 @@ def generate_and_save_signal():
         history.append(response)
         json.dump(history, open(HISTORY_FILE, "w"), indent=2)
 
-        print(f"[{response['timestamp']}] ✅ Ensemble {final_signal} ({confidence}%) — {sub_signals}")
+        print(f"[{response['timestamp']}] ✅ {signal} ({response['confidence']}%) — saved and logged")
         return response
 
     except Exception as e:
@@ -145,24 +105,43 @@ def generate_and_save_signal():
 
 
 def background_scheduler():
+    """Auto-update signal every 15 min."""
     while True:
         generate_and_save_signal()
         time.sleep(REFRESH_INTERVAL_SECS)
 
 
+# === Combine multiple timeframe signals ===
+def get_ensemble_signal(daily, weekly, monthly):
+    signals = [daily, weekly, monthly]
+    buy_count = signals.count("BUY")
+    sell_count = signals.count("SELL")
+
+    if buy_count > sell_count:
+        return "BUY"
+    elif sell_count > buy_count:
+        return "SELL"
+    else:
+        return "NEUTRAL"
+
+
+# === Routes ===
+
 @app.route('/')
 def home():
-    return jsonify({"status": "ok", "time": str(datetime.utcnow())})
+    return jsonify({"status": "ok", "time": str(datetime.now(timezone.utc))})
 
 
 @app.route('/signal', methods=['GET'])
 def signal_api():
+    """Manually trigger signal generation."""
     result = generate_and_save_signal()
     return jsonify(result)
 
 
 @app.route('/history', methods=['GET'])
 def history_api():
+    """Retrieve full signal history."""
     if HISTORY_FILE.exists():
         try:
             history = json.load(open(HISTORY_FILE))
@@ -170,6 +149,51 @@ def history_api():
         except Exception as e:
             return jsonify({"error": f"Failed to read history: {e}"}), 500
     return jsonify({"message": "No signal history found"}), 404
+
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    """
+    Receive JSON input with daily/weekly/monthly data, return ensemble prediction.
+    Example input:
+    {
+      "daily": {"ema21": 2350, "ema50": 2348, "atr14": 14.2},
+      "weekly": {"ema21": 2360, "ema50": 2350, "atr14": 32.1},
+      "monthly": {"ema21": 2380, "ema50": 2330, "atr14": 75.0}
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Missing JSON body"}), 400
+
+        # Dummy prediction for now — replace with your models if separate ones exist
+        model = joblib.load(MODEL_FILE) if MODEL_FILE.exists() else train_default_model()
+
+        signals = {}
+        for tf in ["daily", "weekly", "monthly"]:
+            if tf in data:
+                df = pd.DataFrame([data[tf]])
+                pred = model.predict(df)[0]
+                signals[tf] = "BUY" if pred == 1 else "SELL"
+            else:
+                signals[tf] = "N/A"
+
+        ensemble = get_ensemble_signal(
+            signals.get("daily"), signals.get("weekly"), signals.get("monthly")
+        )
+
+        result = {
+            "status": "success",
+            "signals": signals,
+            "ensemble": ensemble,
+            "timestamp": str(datetime.now(timezone.utc))
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == '__main__':
