@@ -1,0 +1,7 @@
+services:
+  - type: cron
+    name: xauusd-ai-trader
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python ensemble_infer_and_signal.py"
+    schedule: "0 */4 * * *"  # every 4 hours
