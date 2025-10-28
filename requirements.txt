@@ -1,0 +1,11 @@
+pandas
+numpy
+scikit-learn
+matplotlib
+ta
+joblib
+requests
+yfinance
+import pandas as pd
+import numpy as np
+import os
