@@ -12,13 +12,17 @@ env/
 .DS_Store
 Thumbs.db
 
-# Logs and outputs
+# Logs and checkpoints
 *.log
 .ipynb_checkpoints/
 
-# Allow model & data files for Render
+# Allow AI model & dataset files for Render
 !model.pkl
 !features_full_daily.csv
 !XAU_USD_Historical_Data_daily.csv
 !XAU_USD_Historical_Data_weekly.csv
 !XAU_USD_Historical_Data_monthly.csv
+
+# Allow backtest and performance outputs
+!backtest_results.csv
+!strategy_performance.png
