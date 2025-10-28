@@ -7,4 +7,6 @@ services:
     plan: free
     envVars:
       - key: INFER_INTERVAL_SECS
-        value: 14400  # 4 hours (in seconds)
+        value: 3600          # runs inference every 1 hour
+      - key: DATA_PATH
+        value: data/XAU_USD_Historical_Data.csv   # adjust if your file has a different name
