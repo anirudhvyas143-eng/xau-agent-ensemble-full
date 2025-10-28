@@ -197,6 +197,10 @@ def scheduler_loop(interval_secs=INFER_INTERVAL_SECS):
 # --- Flask app ---
 app = Flask("xau_agent")
 
+@app.route("/ping")
+def ping():
+    return jsonify({"ping": "pong", "time": str(datetime.utcnow())})
+
 @app.route("/")
 def root():
     return jsonify({"status":"ok", "time": str(datetime.utcnow())})
