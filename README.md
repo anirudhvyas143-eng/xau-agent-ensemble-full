@@ -1,5 +1,5 @@
 # 🦾 XAUUSD AI Trader Agent  
-AI-powered Gold (XAUUSD) signal generator that analyzes historical and live data, trains a Random Forest ML model, and generates BUY/SELL signals every 4 hours — fully deployable on Render’s free web service.
+AI-powered Gold (XAUUSD) signal generator that analyzes historical and live data, trains a Random Forest ML model, and generates BUY/SELL signals every 1 hour— fully deployable on Render’s free web service.
 
 ---
 
@@ -7,7 +7,7 @@ AI-powered Gold (XAUUSD) signal generator that analyzes historical and live data
 ✅ Uses TradingView historical CSVs (daily, weekly, monthly)  
 ✅ Generates AI-powered indicator set (EMA, RSI, ATR, Volatility, Momentum)  
 ✅ Trains Random Forest model on multi-timeframe features  
-✅ Predicts next 4-hour price movement for XAUUSD  
+✅ Predicts next 1-hour price movement for XAUUSD  
 ✅ Outputs AI signals with **conservative**, **aggressive**, and **safer** entries  
 ✅ Fully automated refresh and deployment  
 ✅ Flask web API for live integration with bots, dashboards, or alerts  
@@ -49,7 +49,7 @@ services:
     plan: free
     envVars:
       - key: INFER_INTERVAL_SECS
-        value: 14400  # every 4 hours
+        value: 3600  # every 1 hour
 ```
 
 ---
