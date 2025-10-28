@@ -27,10 +27,6 @@ datetime
 tqdm
 loguru
 
-# API / brokers
-MetaTrader5
-ib_insync
-
 # Deployment
 flask
 requests
