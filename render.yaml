@@ -7,6 +7,8 @@ services:
     plan: free
     envVars:
       - key: INFER_INTERVAL_SECS
-        value: 3600          # runs inference every 1 hour
+        value: 3600            # run inference every 1 hour
       - key: DATA_PATH
-        value: data/XAU_USD_Historical_Data.csv   # adjust if your file has a different name
+        value: data/XAU_USD_Historical_Data.csv   # your price data
+      - key: PORT
+        value: 10000           # required for Flask on Render
