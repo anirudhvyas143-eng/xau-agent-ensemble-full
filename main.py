@@ -21,13 +21,18 @@ REFRESH_INTERVAL_SECS = 900
 
 
 def train_default_model():
-    """Train a fallback dummy model if none exists."""
+    """Train a fallback dummy model using all expected features (9 total)."""
     model = RandomForestClassifier()
-    dummy_X = pd.DataFrame([[1, 2, 3]])
+    dummy_features = [
+        "ema21_d", "ema50_d", "atr14_d",
+        "ema21_w", "ema50_w", "atr14_w",
+        "ema21_m", "ema50_m", "atr14_m"
+    ]
+    dummy_X = pd.DataFrame([[1]*9], columns=dummy_features)
     dummy_y = [1]
     model.fit(dummy_X, dummy_y)
     joblib.dump(model, MODEL_FILE)
-    print("✅ Default model trained.")
+    print("✅ Default model (9 features) trained.")
     return model
 
 
