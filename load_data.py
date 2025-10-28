@@ -2,27 +2,63 @@ import pandas as pd
 import numpy as np
 import os
 
-def load_and_merge():
-    paths = [
-        'data/XAU_USD_Historical_Data_daily.csv',
-        'data/XAU_USD_Historical_Data_weekly.csv',
-        'data/XAU_USD_Historical_Data_monthly.csv'
-    ]
+# Paths to your datasets
+DATA_DIR = "data"
+FILES = {
+    "daily": "XAU_USD_Historical_Data_daily.csv",
+    "weekly": "XAU_USD_Historical_Data_weekly.csv",
+    "monthly": "XAU_USD_Historical_Data_monthly.csv"
+}
 
-    frames = []
-    for p in paths:
-        if os.path.exists(p):
-            df = pd.read_csv(p)
-            df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
-            df['date'] = pd.to_datetime(df['date'])
-            frames.append(df)
+def load_and_prepare():
+    datasets = {}
+    for tf, fname in FILES.items():
+        path = os.path.join(DATA_DIR, fname)
+        print(f"Loading {tf} data from {path}...")
+        df = pd.read_csv(path)
 
-    data = pd.concat(frames).drop_duplicates('date').sort_values('date')
-    data['ema21'] = data['price'].ewm(span=21).mean()
-    data['ema50'] = data['price'].ewm(span=50).mean()
-    data['atr14'] = (data['high'] - data['low']).rolling(14).mean()
-    data.to_csv('features_full_daily.csv', index=False)
-    print(f"✅ Saved processed data: {len(data)} rows")
+        # Normalize column names
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+
+        # Rename key columns if needed
+        if "price" in df.columns:
+            df.rename(columns={"price": "close"}, inplace=True)
+        if "close" not in df.columns:
+            df.rename(columns={"last": "close"}, inplace=True)
+        
+        # Convert date/time
+        for col in ["date", "datetime", "time"]:
+            if col in df.columns:
+                df["date"] = pd.to_datetime(df[col])
+                break
+
+        df = df.sort_values("date")
+        df = df.set_index("date")
+
+        # Add simple features
+        df["return"] = df["close"].pct_change()
+        df["ma_10"] = df["close"].rolling(10).mean()
+        df["ma_50"] = df["close"].rolling(50).mean()
+        df["rsi_14"] = compute_rsi(df["close"], 14)
+        df["ema_20"] = df["close"].ewm(span=20).mean()
+        df["ema_100"] = df["close"].ewm(span=100).mean()
+        df["volatility"] = df["close"].pct_change().rolling(10).std()
+
+        datasets[tf] = df.dropna()
+
+    return datasets
+
+
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
 
 if __name__ == "__main__":
-    load_and_merge()
+    data = load_and_prepare()
+    for tf, df in data.items():
+        print(f"{tf} data: {len(df)} rows, columns: {df.columns.tolist()[:8]}")
+        print(df.tail(3))
