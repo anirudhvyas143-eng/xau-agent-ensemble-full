@@ -1,68 +1,86 @@
 from flask import Flask, jsonify
 import pandas as pd
 import joblib
-import json, threading, time
+import json, threading, time, os
 from datetime import datetime
 from pathlib import Path
-from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 
+# === File paths ===
+DAILY_FILE = Path("features_full_daily.csv")
+WEEKLY_FILE = Path("features_full_weekly.csv")
+MONTHLY_FILE = Path("features_full_monthly.csv")
+MODEL_FILE = Path("model.pkl")
 SIGNALS_FILE = Path("signals.json")
 HISTORY_FILE = Path("signals_history.json")
-MODEL_FILE = Path("model.pkl")
-REFRESH_INTERVAL_SECS = 900  # 15 minutes
 
-
-def train_default_model():
-    """Train a simple fallback model if model.pkl is missing."""
-    try:
-        print("⚙️ Training default model (model.pkl not found)...")
-        data = pd.read_csv('features_full_daily.csv')
-        features = ['ema21', 'ema50', 'atr14']
-
-        # Basic setup: target is whether ema21 > ema50
-        data['target'] = (data['ema21'] > data['ema50']).astype(int)
-        X = data[features].fillna(method='bfill')
-        y = data['target']
-
-        model = RandomForestClassifier(n_estimators=50, random_state=42)
-        model.fit(X, y)
-        joblib.dump(model, MODEL_FILE)
-        print("✅ Default model trained and saved as model.pkl")
-    except Exception as e:
-        print(f"❌ Failed to train fallback model: {e}")
+# Run signal generation every 15 minutes
+REFRESH_INTERVAL_SECS = 900
 
 
 def generate_and_save_signal():
-    """Core AI inference logic that generates, saves, and logs a signal."""
+    """Generate multi-timeframe signal and save outputs."""
     try:
-        # Ensure model exists
         if not MODEL_FILE.exists():
-            train_default_model()
+            print("⚙️ Training default model (model.pkl not found)...")
+            from sklearn.ensemble import RandomForestClassifier
+            model = RandomForestClassifier()
+            dummy_X = pd.DataFrame([[1, 2, 3]])
+            dummy_y = [1]
+            model.fit(dummy_X, dummy_y)
+            joblib.dump(model, MODEL_FILE)
+            print("✅ Fallback model created.")
+        else:
+            model = joblib.load(MODEL_FILE)
 
-        model = joblib.load(MODEL_FILE)
-        data = pd.read_csv('features_full_daily.csv')
+        # === Load available timeframe data ===
+        data_sources = {}
+        for label, file in {
+            "daily": DAILY_FILE,
+            "weekly": WEEKLY_FILE,
+            "monthly": MONTHLY_FILE
+        }.items():
+            if file.exists():
+                df = pd.read_csv(file)
+                data_sources[label] = df
+            else:
+                print(f"⚠️ Missing file: {file}")
 
-        features = ['ema21', 'ema50', 'atr14']
-        X = data[features].fillna(method='bfill')
-        last_row = X.iloc[-1:]
+        if not data_sources:
+            raise FileNotFoundError("No timeframe CSV files found")
 
-        prediction = model.predict(last_row)[0]
-        prob = model.predict_proba(last_row)[0][prediction]
+        # === Extract latest feature values from each ===
+        def get_latest_features(df, prefix):
+            return {
+                f"ema21_{prefix}": df["ema21"].iloc[-1],
+                f"ema50_{prefix}": df["ema50"].iloc[-1],
+                f"atr14_{prefix}": df["atr14"].iloc[-1],
+            }
+
+        features = {}
+        for timeframe, df in data_sources.items():
+            features.update(get_latest_features(df, timeframe[0]))  # d, w, m suffixes
+
+        X = pd.DataFrame([features])
+
+        # === Predict ===
+        prediction = model.predict(X)[0]
+        prob = model.predict_proba(X)[0][prediction]
         signal = "BUY" if prediction == 1 else "SELL"
 
         response = {
             "signal": signal,
             "confidence": round(prob * 100, 2),
-            "timestamp": str(datetime.utcnow())
+            "timestamp": str(datetime.utcnow()),
+            "features_used": list(features.keys()),
         }
 
-        # Save latest signal
+        # === Save latest signal ===
         with open(SIGNALS_FILE, "w") as f:
             json.dump(response, f, indent=2)
 
-        # Append to history
+        # === Append to history ===
         history = []
         if HISTORY_FILE.exists():
             try:
@@ -72,7 +90,7 @@ def generate_and_save_signal():
         history.append(response)
         json.dump(history, open(HISTORY_FILE, "w"), indent=2)
 
-        print(f"[{response['timestamp']}] Signal: {signal} ({response['confidence']}%) — saved and logged")
+        print(f"[{response['timestamp']}] ✅ {signal} ({response['confidence']}%) — saved and logged")
         return response
 
     except Exception as e:
@@ -81,7 +99,7 @@ def generate_and_save_signal():
 
 
 def background_scheduler():
-    """Runs generate_and_save_signal every 15 min continuously."""
+    """Auto-update signal every 15 min."""
     while True:
         generate_and_save_signal()
         time.sleep(REFRESH_INTERVAL_SECS)
@@ -94,14 +112,14 @@ def home():
 
 @app.route('/signal', methods=['GET'])
 def signal_api():
-    """Manually trigger signal generation (optional endpoint)."""
+    """Manually trigger signal generation."""
     result = generate_and_save_signal()
     return jsonify(result)
 
 
 @app.route('/history', methods=['GET'])
 def history_api():
-    """View all historical signals."""
+    """Retrieve full signal history."""
     if HISTORY_FILE.exists():
         try:
             history = json.load(open(HISTORY_FILE))
@@ -112,6 +130,5 @@ def history_api():
 
 
 if __name__ == '__main__':
-    # Start background signal scheduler
     threading.Thread(target=background_scheduler, daemon=True).start()
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
