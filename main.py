@@ -4,18 +4,44 @@ import joblib
 import json, threading, time
 from datetime import datetime
 from pathlib import Path
+from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 
 SIGNALS_FILE = Path("signals.json")
 HISTORY_FILE = Path("signals_history.json")
+MODEL_FILE = Path("model.pkl")
 REFRESH_INTERVAL_SECS = 900  # 15 minutes
+
+
+def train_default_model():
+    """Train a simple fallback model if model.pkl is missing."""
+    try:
+        print("⚙️ Training default model (model.pkl not found)...")
+        data = pd.read_csv('features_full_daily.csv')
+        features = ['ema21', 'ema50', 'atr14']
+
+        # Basic setup: target is whether ema21 > ema50
+        data['target'] = (data['ema21'] > data['ema50']).astype(int)
+        X = data[features].fillna(method='bfill')
+        y = data['target']
+
+        model = RandomForestClassifier(n_estimators=50, random_state=42)
+        model.fit(X, y)
+        joblib.dump(model, MODEL_FILE)
+        print("✅ Default model trained and saved as model.pkl")
+    except Exception as e:
+        print(f"❌ Failed to train fallback model: {e}")
 
 
 def generate_and_save_signal():
     """Core AI inference logic that generates, saves, and logs a signal."""
     try:
-        model = joblib.load('model.pkl')
+        # Ensure model exists
+        if not MODEL_FILE.exists():
+            train_default_model()
+
+        model = joblib.load(MODEL_FILE)
         data = pd.read_csv('features_full_daily.csv')
 
         features = ['ema21', 'ema50', 'atr14']
