@@ -167,7 +167,6 @@ def predict():
         if not data:
             return jsonify({"error": "Missing JSON body"}), 400
 
-        # Dummy prediction for now — replace with your models if separate ones exist
         model = joblib.load(MODEL_FILE) if MODEL_FILE.exists() else train_default_model()
 
         signals = {}
@@ -196,6 +195,107 @@ def predict():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/dashboard')
+def dashboard():
+    """Simple web dashboard for signal visualization."""
+    import html
+
+    latest_signal = {}
+    try:
+        if SIGNALS_FILE.exists():
+            latest_signal = json.load(open(SIGNALS_FILE))
+    except Exception as e:
+        latest_signal = {"error": str(e)}
+
+    history_count = 0
+    if HISTORY_FILE.exists():
+        try:
+            hist = json.load(open(HISTORY_FILE))
+            history_count = len(hist)
+        except Exception:
+            pass
+
+    signal = latest_signal.get("signal", "N/A")
+    conf = latest_signal.get("confidence", 0)
+    time_str = latest_signal.get("timestamp", "N/A")
+
+    color = "#00C853" if signal == "BUY" else "#D50000" if signal == "SELL" else "#AAAAAA"
+
+    html_content = f"""
+    <html>
+    <head>
+        <title>XAU-USD Signal Dashboard</title>
+        <meta http-equiv="refresh" content="300">
+        <style>
+            body {{
+                background-color: #0d1117;
+                color: #fff;
+                font-family: 'Arial', sans-serif;
+                text-align: center;
+                padding-top: 40px;
+            }}
+            .signal-box {{
+                display: inline-block;
+                padding: 25px;
+                border-radius: 15px;
+                background-color: #161b22;
+                box-shadow: 0 0 15px rgba(255,255,255,0.1);
+                width: 400px;
+            }}
+            .signal {{
+                font-size: 60px;
+                font-weight: bold;
+                color: {color};
+            }}
+            .confidence {{
+                font-size: 22px;
+                margin-top: 10px;
+            }}
+            .timestamp {{
+                font-size: 14px;
+                color: #bbb;
+                margin-top: 10px;
+            }}
+            .button {{
+                margin-top: 20px;
+                padding: 10px 20px;
+                font-size: 16px;
+                color: #fff;
+                background-color: #1f6feb;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+            }}
+            .button:hover {{
+                background-color: #2a7ffb;
+            }}
+            .footer {{
+                margin-top: 30px;
+                color: #777;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="signal-box">
+            <h2>XAU/USD Ensemble Signal</h2>
+            <div class="signal">{html.escape(signal)}</div>
+            <div class="confidence">Confidence: {conf}%</div>
+            <div class="timestamp">Last Updated: {html.escape(time_str)}</div>
+            <button class="button" onclick="fetch('/signal').then(() => window.location.reload())">
+                🔄 Regenerate Signal
+            </button>
+        </div>
+        <div class="footer">
+            <p>History entries: {history_count}</p>
+            <p>Auto-refreshes every 5 minutes</p>
+        </div>
+    </body>
+    </html>
+    """
+    return html_content
+
+
 if __name__ == '__main__':
     threading.Thread(target=background_scheduler, daemon=True).start()
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    
