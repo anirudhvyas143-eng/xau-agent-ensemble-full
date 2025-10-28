@@ -1,32 +1,6 @@
-# Core dependencies
+flask
 pandas
 numpy
 scikit-learn
 matplotlib
-seaborn
-xgboost
-lightgbm
-catboost
-scipy
-
-# Deep Learning & AI
-torch
-torchvision
-tensorflow
-keras
-
-# Finance and trading
-pandas_ta
-ta
-yfinance
-backtrader
-
-# Time management & logging
-schedule
-datetime
-tqdm
-loguru
-
-# Deployment
-flask
-requests
+joblib
