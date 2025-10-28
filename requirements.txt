@@ -1,11 +1,36 @@
+# Core dependencies
 pandas
 numpy
 scikit-learn
 matplotlib
+seaborn
+xgboost
+lightgbm
+catboost
+scipy
+
+# Deep Learning & AI
+torch
+torchvision
+tensorflow
+keras
+
+# Finance and trading
+pandas_ta
 ta
-joblib
-requests
 yfinance
-import pandas as pd
-import numpy as np
-import os
+backtrader
+
+# Time management & logging
+schedule
+datetime
+tqdm
+loguru
+
+# API / brokers
+MetaTrader5
+ib_insync
+
+# Deployment
+flask
+requests
