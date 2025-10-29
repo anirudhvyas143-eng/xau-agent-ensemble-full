@@ -1,156 +1,228 @@
-"""
-AI AUTOMATION ENGINE — XAUUSD AI Trader
----------------------------------------
-This script automatically:
-✅ Loads and cleans daily/weekly/monthly datasets
-✅ Trains and optimizes hybrid ML + RL ensemble
-✅ Generates hourly BUY/SELL signals with confidence
-✅ Backtests automatically and logs all results
-✅ Serves API endpoints for live inference (Flask)
-"""
-
 import os
 import time
 import json
-import joblib
-import numpy as np
 import pandas as pd
-import datetime
+import numpy as np
+from datetime import datetime
 from flask import Flask, jsonify
 from flask_cors import CORS
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+import joblib
 from loguru import logger
 from apscheduler.schedulers.background import BackgroundScheduler
-
-# ML / RL / Optimization Imports
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
 import optuna
 from stable_baselines3 import PPO
+from stable_baselines3.common.envs import DummyVecEnv
 import gymnasium as gym
 
 # ===============================
-# CONFIG
+# CONFIGURATION
 # ===============================
-DATA_PATH = os.getenv("DATA_PATH_DAILY", "data/XAU_USD_Historical_Data_daily.csv")
-MODEL_PATH = os.getenv("MODEL_SAVE_PATH", "models/best_model.pkl")
+DATA_DIR = os.getenv("DATA_DIR", "data")
+MODEL_SAVE_PATH = os.getenv("MODEL_SAVE_PATH", "models/best_model.pkl")
 LOG_PATH = os.getenv("LOG_PATH", "logs/app.log")
 INFER_INTERVAL = int(os.getenv("INFER_INTERVAL_SECS", 3600))  # every hour
+PORT = int(os.getenv("PORT", 10000))
 
 os.makedirs("models", exist_ok=True)
 os.makedirs("logs", exist_ok=True)
 
-logger.add(LOG_PATH, rotation="1 MB")
+logger.add(LOG_PATH, rotation="1 day", level="INFO")
+logger.info("🚀 AI Automation System Initialized")
 
 # ===============================
-# DATA PREPARATION
+# HELPER FUNCTIONS
 # ===============================
-def load_and_prepare_data():
-    logger.info(f"Loading data from {DATA_PATH}...")
-    df = pd.read_csv(DATA_PATH)
+
+def load_data():
+    """Loads and prepares historical data."""
+    path = os.path.join(DATA_DIR, "XAU_USD_Historical_Data_daily.csv")
+    df = pd.read_csv(path)
     df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
-    if "close" not in df.columns:
-        if "price" in df.columns:
-            df.rename(columns={"price": "close"}, inplace=True)
-        elif "last" in df.columns:
-            df.rename(columns={"last": "close"}, inplace=True)
+    if "price" in df.columns:
+        df.rename(columns={"price": "close"}, inplace=True)
+    elif "close" not in df.columns and "last" in df.columns:
+        df.rename(columns={"last": "close"}, inplace=True)
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.sort_values("date").dropna(subset=["close"])
     df["return"] = df["close"].pct_change()
     df["ema21"] = df["close"].ewm(span=21).mean()
     df["ema50"] = df["close"].ewm(span=50).mean()
-    df["atr14"] = df["close"].pct_change().rolling(14).std() * 100
-    df = df.dropna()
+    df["atr14"] = df["return"].rolling(14).std()
+    df.dropna(inplace=True)
+
+    logger.info(f"✅ Data loaded: {len(df)} rows")
     return df
 
-# ===============================
-# MACHINE LEARNING TRAINING
-# ===============================
-def train_ml_model(df):
-    logger.info("Training Random Forest (Ensemble)...")
+
+def train_optuna_model(df):
+    """Trains and optimizes RandomForest with Optuna."""
     df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
-    features = ["ema21", "ema50", "atr14"]
-    X, y = df[features], df["target"]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-    model = RandomForestClassifier(n_estimators=200, random_state=42)
-    model.fit(X_train, y_train)
-    acc = accuracy_score(y_test, model.predict(X_test))
-    joblib.dump(model, MODEL_PATH)
-    logger.success(f"Model trained successfully with accuracy: {acc:.2%}")
-    return model, acc
+    X = df[["ema21", "ema50", "atr14"]]
+    y = df["target"]
 
-# ===============================
-# REINFORCEMENT LEARNING TUNER
-# ===============================
-class SimpleEnv(gym.Env):
-    def __init__(self, prices):
-        super(SimpleEnv, self).__init__()
-        self.prices = prices
-        self.action_space = gym.spaces.Discrete(2)  # 0 = SELL, 1 = BUY
-        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
-        self.current_step = 50
+    def objective(trial):
+        n_estimators = trial.suggest_int("n_estimators", 100, 500)
+        max_depth = trial.suggest_int("max_depth", 3, 15)
+        min_samples_split = trial.suggest_int("min_samples_split", 2, 10)
 
-    def reset(self, *, seed=None, options=None):
-        self.current_step = 50
-        return self._get_obs(), {}
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=0.2, shuffle=False
+        )
 
-    def _get_obs(self):
-        close = self.prices[self.current_step]
-        ema21 = np.mean(self.prices[self.current_step-21:self.current_step])
-        ema50 = np.mean(self.prices[self.current_step-50:self.current_step])
-        return np.array([close, ema21, ema50], dtype=np.float32)
+        model = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            random_state=42,
+        )
+        model.fit(X_train, y_train)
+        preds = model.predict(X_val)
+        return accuracy_score(y_val, preds)
 
-    def step(self, action):
-        reward = 0
-        if self.current_step < len(self.prices) - 1:
-            price_change = self.prices[self.current_step + 1] - self.prices[self.current_step]
-            reward = price_change if action == 1 else -price_change
-        self.current_step += 1
-        done = self.current_step >= len(self.prices) - 1
-        return self._get_obs(), reward, done, False, {}
-
-def train_rl_model(prices):
-    logger.info("Training Reinforcement Learning agent (PPO)...")
-    env = SimpleEnv(prices)
-    model = PPO("MlpPolicy", env, verbose=0)
-    model.learn(total_timesteps=20000)
-    model.save("models/rl_model.zip")
-    logger.success("RL model training completed successfully!")
-
-# ===============================
-# HYPERPARAMETER OPTIMIZATION
-# ===============================
-def objective(trial):
-    n_estimators = trial.suggest_int("n_estimators", 50, 300)
-    max_depth = trial.suggest_int("max_depth", 2, 12)
-    df = load_and_prepare_data()
-    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
-    features = ["ema21", "ema50", "atr14"]
-    X, y = df[features], df["target"]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-    model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth)
-    model.fit(X_train, y_train)
-    acc = accuracy_score(y_test, model.predict(X_test))
-    return acc
-
-def optimize_model():
-    logger.info("Starting hyperparameter optimization with Optuna...")
+    logger.info("🔍 Starting Optuna tuning...")
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=15, show_progress_bar=False)
     best_params = study.best_params
-    logger.success(f"Best parameters found: {best_params}")
-    return best_params
+    logger.info(f"🏆 Best Params: {best_params}")
 
-# ===============================
-# SIGNAL GENERATION
-# ===============================
-def generate_signal(model, df):
-    latest = df.iloc[-1]
-    X_latest = latest[["ema21", "ema50", "atr14"]].values.reshape(1, -1)
+    final_model = RandomForestClassifier(**best_params, random_state=42)
+    final_model.fit(X, y)
+    joblib.dump(final_model, MODEL_SAVE_PATH)
+    logger.info(f"💾 Model saved to {MODEL_SAVE_PATH}")
+    return final_model
+
+
+def reinforcement_training(df):
+    """Optional: train PPO agent to refine long/short timing."""
+    logger.info("🤖 Starting PPO Reinforcement Learning fine-tune...")
+
+    class TradingEnv(gym.Env):
+        def __init__(self, data):
+            super().__init__()
+            self.data = data.reset_index(drop=True)
+            self.current_step = 0
+            self.balance = 10000
+            self.position = 0
+            self.observation_space = gym.spaces.Box(
+                low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32
+            )
+            self.action_space = gym.spaces.Discrete(3)  # 0 = hold, 1 = buy, 2 = sell
+
+        def reset(self, seed=None, options=None):
+            self.current_step = 0
+            self.balance = 10000
+            self.position = 0
+            return self._get_obs(), {}
+
+        def _get_obs(self):
+            row = self.data.iloc[self.current_step]
+            return np.array([row["ema21"], row["ema50"], row["atr14"]], dtype=np.float32)
+
+        def step(self, action):
+            price = self.data.iloc[self.current_step]["close"]
+            reward = 0
+
+            if action == 1:  # BUY
+                self.position += 1
+                reward = self.data.iloc[self.current_step + 1]["return"]
+            elif action == 2:  # SELL
+                self.position -= 1
+                reward = -self.data.iloc[self.current_step + 1]["return"]
+
+            self.balance *= (1 + reward)
+            self.current_step += 1
+            done = self.current_step >= len(self.data) - 2
+            return self._get_obs(), reward, done, False, {}
+
+    env = DummyVecEnv([lambda: TradingEnv(df)])
+    agent = PPO("MlpPolicy", env, verbose=0)
+    agent.learn(total_timesteps=10000)
+    agent.save("models/ppo_agent.zip")
+    logger.info("✅ PPO agent saved (models/ppo_agent.zip)")
+
+
+def generate_signal(df, model):
+    """Generates latest BUY/SELL signal."""
+    last = df.iloc[-1]
+    X_latest = last[["ema21", "ema50", "atr14"]].values.reshape(1, -1)
     prediction = model.predict(X_latest)[0]
     prob = model.predict_proba(X_latest)[0][prediction]
-    price = float(latest["close"])
+    price = float(last["close"])
 
-    if prediction
+    if prediction == 1:
+        signal = "BUY"
+        tp = price * 1.008
+        sl = price * 0.994
+        entry = price * 0.999
+    else:
+        signal = "SELL"
+        tp = price * 0.992
+        sl = price * 1.006
+        entry = price * 1.001
+
+    result = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "signal": signal,
+        "confidence": round(float(prob), 4),
+        "entry_price": round(entry, 2),
+        "take_profit": round(tp, 2),
+        "stop_loss": round(sl, 2),
+        "current_price": round(price, 2),
+    }
+
+    logger.info(f"📈 Signal Generated: {result}")
+    return result
+
+
+# ===============================
+# BACKGROUND JOBS
+# ===============================
+def retrain_job():
+    df = load_data()
+    model = train_optuna_model(df)
+    reinforcement_training(df)
+    logger.info("♻️ Retraining complete")
+
+
+def inference_job():
+    df = load_data()
+    model = joblib.load(MODEL_SAVE_PATH)
+    signal = generate_signal(df, model)
+    with open("latest_signal.json", "w") as f:
+        json.dump(signal, f, indent=2)
+    logger.info("💡 Latest signal saved to latest_signal.json")
+
+
+# ===============================
+# FLASK APP
+# ===============================
+app = Flask(__name__)
+CORS(app)
+
+@app.route("/signal", methods=["GET"])
+def get_signal():
+    if not os.path.exists("latest_signal.json"):
+        inference_job()
+    with open("latest_signal.json") as f:
+        signal = json.load(f)
+    return jsonify(signal)
+
+# ===============================
+# SCHEDULER + STARTUP
+# ===============================
+scheduler = BackgroundScheduler()
+scheduler.add_job(retrain_job, "interval", hours=24)
+scheduler.add_job(inference_job, "interval", seconds=INFER_INTERVAL)
+scheduler.start()
+logger.info("🕒 Scheduler started (auto retrain + inference)")
+
+if __name__ == "__main__":
+    retrain_job()
+    inference_job()
+    logger.info(f"🌍 Starting Flask API on port {PORT}")
+    app.run(host="0.0.0.0", port=PORT)
