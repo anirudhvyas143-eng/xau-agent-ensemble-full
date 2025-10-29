@@ -12,9 +12,28 @@ OUTPUT_PATHS = {
     "ensemble": "data/features_ensemble.csv"
 }
 
+def detect_close_column(df):
+    """Auto-detect and normalize close column name from Yahoo or any source."""
+    possible_close_cols = ["Close", "Adj Close", "close", "Price", "Last"]
+    for c in possible_close_cols:
+        if c in df.columns:
+            df["close"] = df[c]
+            break
+    else:
+        raise ValueError(f"❌ None of {possible_close_cols} found in columns: {df.columns.tolist()}")
+    return df
+
+
 def compute_technical_features(df):
     """Compute technical indicators."""
     df = df.copy()
+    df = detect_close_column(df)
+
+    if "High" in df.columns and "Low" in df.columns:
+        df.rename(columns={"High": "high", "Low": "low"}, inplace=True)
+    elif not all(col in df.columns for col in ["high", "low"]):
+        raise ValueError("❌ High/Low columns missing for ATR computation")
+
     df["ema_20"] = df["close"].ewm(span=20, adjust=False).mean()
     df["ema_50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["ema_100"] = df["close"].ewm(span=100, adjust=False).mean()
