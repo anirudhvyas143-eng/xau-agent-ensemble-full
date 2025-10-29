@@ -3,8 +3,8 @@ services:
     name: xauusd-ai-trader
     env: python
     buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
+  pip install --upgrade pip
+  pip install --prefer-binary --no-build-isolation -r requirements.txt
     startCommand: "python ai_automation.py"
     plan: free
     autoDeploy: true
