@@ -15,7 +15,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import accuracy_score
 from scipy.stats import ks_2samp
 import matplotlib.pyplot as plt
-import warnings
+import warning
 warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
@@ -81,12 +81,22 @@ def fetch_and_build_datasets():
     # Hourly: last 60 days of hourly bars (for speed)
     try:
         df_hour = yf.download(YF_SYMBOL, period="60d", interval="1h", progress=False)
+            # 🔧 Normalize Yahoo Finance columns
+    if not df_hour.empty:
+        df_hour.columns = [c.capitalize() for c in df_hour.columns]
+        df_hour.reset_index(inplace=True)
+        print("✅ Hourly columns normalized:", df_hour.columns.tolist())
     except Exception as e:
         print("yfinance hourly fetch failed:", e)
         df_hour = pd.DataFrame()
     # Daily: longer history
     try:
         df_day = yf.download(YF_SYMBOL, period="10y", interval="1d", progress=False)
+            # 🔧 Normalize daily data columns
+    if not df_day.empty:
+        df_day.columns = [c.capitalize() for c in df_day.columns]
+        df_day.reset_index(inplace=True)
+        print("✅ Daily columns normalized:", df_day.columns.tolist())
     except Exception as e:
         print("yfinance daily fetch failed:", e)
         df_day = pd.DataFrame()
