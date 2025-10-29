@@ -20,41 +20,31 @@ def fetch_from_yahoo():
 
     logger.info(f"Fetching fresh data for {YF_SYMBOL} ...")
 
-    # ---- Daily data ----
-    df_daily = yf.download(YF_SYMBOL, period="25y", interval="1d")
-    if df_daily.empty:
-        logger.warning("Daily data fetch failed.")
-    else:
-        df_daily.reset_index(inplace=True)
-        df_daily.rename(columns=lambda x: x.strip().capitalize(), inplace=True)
-        if "Close" not in df_daily.columns and "Adj Close" in df_daily.columns:
-            df_daily.rename(columns={"Adj Close": "Close"}, inplace=True)
-        df_daily.to_csv(os.path.join(DATA_DIR, FILES["daily"]), index=False)
-        logger.info(f"✅ Saved daily → {len(df_daily)} rows")
+    intervals = {
+        "daily": ("25y", "1d"),
+        "weekly": ("25y", "1wk"),
+        "monthly": ("25y", "1mo")
+    }
 
-    # ---- Weekly data ----
-    df_weekly = yf.download(YF_SYMBOL, period="25y", interval="1wk")
-    if df_weekly.empty:
-        logger.warning("Weekly data fetch failed.")
-    else:
-        df_weekly.reset_index(inplace=True)
-        df_weekly.rename(columns=lambda x: x.strip().capitalize(), inplace=True)
-        if "Close" not in df_weekly.columns and "Adj Close" in df_weekly.columns:
-            df_weekly.rename(columns={"Adj Close": "Close"}, inplace=True)
-        df_weekly.to_csv(os.path.join(DATA_DIR, FILES["weekly"]), index=False)
-        logger.info(f"✅ Saved weekly → {len(df_weekly)} rows")
+    for tf, (period, interval) in intervals.items():
+        try:
+            df = yf.download(YF_SYMBOL, period=period, interval=interval)
+            if df.empty:
+                logger.warning(f"{tf.capitalize()} data fetch failed for {YF_SYMBOL}.")
+                continue
 
-    # ---- Monthly data ----
-    df_monthly = yf.download(YF_SYMBOL, period="25y", interval="1mo")
-    if df_monthly.empty:
-        logger.warning("Monthly data fetch failed.")
-    else:
-        df_monthly.reset_index(inplace=True)
-        df_monthly.rename(columns=lambda x: x.strip().capitalize(), inplace=True)
-        if "Close" not in df_monthly.columns and "Adj Close" in df_monthly.columns:
-            df_monthly.rename(columns={"Adj Close": "Close"}, inplace=True)
-        df_monthly.to_csv(os.path.join(DATA_DIR, FILES["monthly"]), index=False)
-        logger.info(f"✅ Saved monthly → {len(df_monthly)} rows")
+            df.reset_index(inplace=True)
+            df.rename(columns=lambda x: x.strip().capitalize(), inplace=True)
+
+            # Ensure 'Close' column exists
+            if "Close" not in df.columns and "Adj Close" in df.columns:
+                df.rename(columns={"Adj Close": "Close"}, inplace=True)
+
+            file_path = os.path.join(DATA_DIR, FILES[tf])
+            df.to_csv(file_path, index=False)
+            logger.info(f"✅ Saved {tf} → {len(df)} rows to {file_path}")
+        except Exception as e:
+            logger.error(f"❌ Error fetching {tf} data: {e}")
 
 # === Step 2: Load + clean + feature engineer ===
 def load_and_prepare():
@@ -70,7 +60,7 @@ def load_and_prepare():
     for tf, fname in FILES.items():
         path = os.path.join(DATA_DIR, fname)
         if not os.path.exists(path):
-            print(f"⚠️ File not found even after fetch: {path}")
+            logger.warning(f"⚠️ File not found even after fetch: {path}")
             continue
 
         print(f"📥 Loading {tf.upper()} data from {path} ...")
@@ -95,22 +85,27 @@ def load_and_prepare():
 
         # --- Ensure close exists ---
         if "close" not in df.columns:
-            raise ValueError(f"❌ Missing 'close' column in {fname}")
+            logger.error(f"❌ Missing 'close' column in {fname}. Columns found: {df.columns}")
+            continue
 
         # --- Technical Indicators ---
-        df["return"] = df["close"].pct_change()
-        df["ema_20"] = ta.trend.ema_indicator(df["close"], window=20)
-        df["ema_50"] = ta.trend.ema_indicator(df["close"], window=50)
-        df["ema_100"] = ta.trend.ema_indicator(df["close"], window=100)
-        df["rsi_14"] = ta.momentum.rsi(df["close"], window=14)
-        df["atr_14"] = ta.volatility.average_true_range(
-            high=df["high"] if "high" in df.columns else df["close"],
-            low=df["low"] if "low" in df.columns else df["close"],
-            close=df["close"],
-            window=14
-        )
-        df["volatility"] = df["close"].pct_change().rolling(10).std()
-        df["momentum"] = ta.momentum.roc(df["close"], window=5)
+        try:
+            df["return"] = df["close"].pct_change()
+            df["ema_20"] = ta.trend.ema_indicator(df["close"], window=20)
+            df["ema_50"] = ta.trend.ema_indicator(df["close"], window=50)
+            df["ema_100"] = ta.trend.ema_indicator(df["close"], window=100)
+            df["rsi_14"] = ta.momentum.rsi(df["close"], window=14)
+            df["atr_14"] = ta.volatility.average_true_range(
+                high=df["high"] if "high" in df.columns else df["close"],
+                low=df["low"] if "low" in df.columns else df["close"],
+                close=df["close"],
+                window=14
+            )
+            df["volatility"] = df["close"].pct_change().rolling(10).std()
+            df["momentum"] = ta.momentum.roc(df["close"], window=5)
+        except Exception as e:
+            logger.error(f"Error computing indicators for {tf}: {e}")
+            continue
 
         # --- Drop incomplete rows ---
         df = df.dropna()
