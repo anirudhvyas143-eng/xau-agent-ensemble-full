@@ -1,147 +1,160 @@
-🦾 XAUUSD AI Trader Agent — Adaptive ML + RL + Automation
+# 🦾 XAUUSD AI Trader Agent — Adaptive ML + RL + Agentic Automation
 
-A next-gen, full-stack AI-powered trading engine for Gold (XAUUSD).
+A next-gen, full-stack AI-powered trading engine for Gold (XAUUSD).  
 This system merges Machine Learning, Reinforcement Learning, Quantitative Analysis, and Agentic AI automation to deliver real-time BUY/SELL signals on both hourly and daily timeframes — retraining itself automatically to stay profitable in any market condition.
 
-⸻
+---
 
-⚙️ Core Capabilities
-✅ Dual-Timeframe Signal Engine — Hourly (1H) and Daily (1D)
-✅ Automated Data Pipeline — auto-fetches & cleans gold price data
-✅ Feature Engineering Suite — EMA, ATR, RSI, Volatility, Momentum, Regime Detection
-✅ ML + RL Hybrid Models — ensemble of XGBoost, LightGBM, CatBoost + Stable-Baselines (PPO/DQN)
-✅ AI Automation Layer — detects drift, retrains, and redeploys without manual input
-✅ Optuna + HyperOpt Optimization — parameter tuning for peak signal precision
-✅ Backtesting + QuantStats Reports — transparent strategy metrics & equity curves
-✅ REST API + Dashboard Ready — simple endpoints for bots, dashboards, or alerts
-✅ Render Free-Plan Compatible — deploy instantly with hourly & daily refresh
+## ⚙️ Core Capabilities
+✅ Dual-Timeframe Signal Engine — Hourly (1H) and Daily (1D)  
+✅ Automated Data Pipeline — Auto-fetches & cleans gold price data via Yahoo Finance  
+✅ Feature Engineering Suite — EMA, ATR, RSI, Volatility, Momentum, Regime Detection  
+✅ Hybrid ML + RL Models — XGBoost, LightGBM, CatBoost + Stable-Baselines (PPO/DQN)  
+✅ Self-Learning AI Automation Layer — Detects drift, retrains, redeploys automatically  
+✅ Optuna + HyperOpt Optimization — Peak signal precision tuning  
+✅ Backtesting + QuantStats Reports — Transparent equity curves & strategy metrics  
+✅ REST API + Dashboard Ready — Endpoints for trading bots, dashboards, or alerts  
+✅ Render Free-Plan Compatible — Auto-refresh with hourly & daily inference  
 
-⸻
+---
 
-📂 Project Structure
+## 🧩 New Multi-Strategy Engine (Added Oct 2025)
+Integrated Fundamental + Technical Strategy Fusion:
+- Trend-Following — Trades with macro direction using multi-EMA crossovers  
+- News Trading — Adapts to volatility surges post major events (CPI, Fed, geopolitical)  
+- Range Trading — Detects support/resistance ranges & mean-reversion setups  
+- Position Trading — Long-term, fundamentally driven signal bias  
+- Auto-Ensemble Blend — Dynamic weighting between fundamental + technical signals  
 
-/data — Historical CSV datasets (hourly, daily, weekly)
-/models — Auto-saved ML / RL models
-/logs — Runtime and retraining logs
-/features_engineering.py — Feature generation (EMA, RSI, ATR, Momentum)
-/train_model.py — Initial supervised + ensemble model training
-/ensemble_train_retrain.py — Continuous retraining + ensemble logic
-/ai_automation.py — Drift detection, auto-retrain, version control
-/backtest_engine.py — Performance simulation + metrics + plots
-/main.py — Core Flask API & hourly/daily inference logic
-/requirements.txt — Dependencies
-/render.yaml — Render deploy configuration
+Controlled via `strategy_manager.py`, allowing plug-and-play custom strategies and weighting.
+
+---
+
+## 📂 Project Structure
+/data — Historical datasets (auto-fetched from Yahoo Finance)  
+/models — Auto-saved ML & RL model checkpoints  
+/logs — Runtime, drift, and retraining logs  
+/load_data.py — Fetch + preprocess multi-timeframe XAUUSD data  
+/features_engineering.py — Technical feature builder (EMA, RSI, ATR, Momentum)  
+/strategy_manager.py — Core fusion: trend-following, range, news, position trading  
+/ensemble_train_retrain.py — Continuous retraining & ensemble logic  
+/ai_automation.py — Drift detection + auto-retrain pipeline  
+/backtest_engine.py — Strategy simulation + QuantStats reports  
+/main.py — Flask API (inference & signal serving)  
+/requirements.txt — Dependencies  
+/render.yaml — Render deploy configuration  
 /README.md — Documentation (this file)
 
-⸻
+---
 
-🚀 One-Click Render Deployment
-	1.	Push this repo to GitHub:
+## 🚀 Quick Deploy on Render
+1️⃣ Push this repo to GitHub  
+git init  
+git add .  
+git commit -m "Initial XAUUSD AI Trader commit"  
+git branch -M main  
+git remote add origin https://github.com/yourname/xauusd-ai-trader.git  
+git push -u origin main  
 
-git init
-git add .
-git commit -m “Initial XAUUSD AI Trader commit”
-git branch -M main
-git remote add origin https://github.com/yourname/xauusd-ai-trader.git
-git push -u origin main
-	2.	Go to Render.com → New Web Service
-	3.	Connect your GitHub repo
-	4.	Choose Free Plan
+2️⃣ Go to Render.com → “New Web Service”  
+- Connect your GitHub repo  
+- Choose Free Plan  
 
-Build Command:
-pip install –upgrade pip
-pip install -r requirements.txt
+Build Command:  
+pip install --upgrade pip  
+pip install --prefer-binary --no-build-isolation -r requirements.txt  
 
-Start Command:
-python main.py
+Start Command:  
+python ai_automation.py  
 
-⸻
+---
 
-🧠 Smart AI Automation Overview
+## 🧠 System Flow Overview
+load_data.py → Fetches gold data (daily/weekly/monthly) via Yahoo Finance  
+features_engineering.py → Computes EMA, RSI, ATR, Momentum, Volatility, etc.  
+strategy_manager.py → Blends multiple strategies (trend/news/range/position)  
+ensemble_train_retrain.py → Periodic retraining & model selection  
+ai_automation.py → Monitors drift, triggers retraining, logs updates  
+backtest_engine.py → Generates performance reports  
+main.py → Flask API endpoints for signals & history  
 
-features_engineering.py → Generates EMA, RSI, ATR, Momentum, Volatility, Z-Score features
-train_model.py → Trains baseline XGBoost/LightGBM/CatBoost + RL models
-ensemble_train_retrain.py → Periodically retrains ensemble → saves best performer
-ai_automation.py → Detects model drift → auto-retrain → push new model to Render
-backtest_engine.py → Compares AI vs Market, exports metrics + plot
-main.py → Flask API: /run, /run_daily, /history
+---
 
-⸻
+## 🌐 API Endpoints
+**Health Check:**  
+GET /  
+→ { "status": "ok", "time": "2025-10-29T06:00Z", "message": "XAUUSD AI Trader active" }
 
-🌐 API Endpoints
+**Run Hourly Signal:**  
+GET /run  
+→ { "signal": "BUY", "confidence": 0.93, "entry": 2382.4, "tp": 2401.2, "sl": 2368.9 }
 
-Health Check
-GET /
-Response:
-{ “status”: “ok”, “time”: “2025-10-29T06:00Z”, “message”: “XAUUSD AI Trader active (hourly + daily)” }
+**Run Daily Signal:**  
+GET /run_daily  
+→ { "signal": "SELL", "confidence": 0.88 }
 
-Run Hourly Signal
-GET /run
-Response:
-{ “status”: “ok”, “result”: { “timestamp”: “2025-10-29T06:02Z”, “timeframe”: “1H”, “signal”: “BUY”, “confidence”: 0.93, “conservative_entry”: 2382.4, “aggressive_entry”: 2386.1, “safer_entry”: 2379.8, “take_profit”: 2401.2, “stop_loss”: 2368.9 } }
+**Signal History:**  
+GET /history  
+→ { "history": [{ "tf": "1H", "signal": "BUY", "price": 2378.3 }, ...] }
 
-Run Daily Signal
-GET /run_daily
-Response:
-{ “status”: “ok”, “result”: { “timestamp”: “2025-10-29T06:05Z”, “timeframe”: “1D”, “signal”: “SELL”, “confidence”: 0.88 } }
+---
 
-Signal History
-GET /history
-Response:
-{ “history”: [ { “time”: “2025-10-28T20:00Z”, “tf”: “1H”, “signal”: “BUY”, “price”: 2378.3 }, { “time”: “2025-10-28”, “tf”: “1D”, “signal”: “SELL”, “price”: 2369.5 } ] }
+## 📊 Backtesting & Performance
+Run backtesting:  
+python backtest_engine.py  
 
-⸻
+Outputs:  
+- strategy_performance.png → AI vs Market equity curve  
+- backtest_results.csv → full trade log  
+- Metrics: Total Return %, Sharpe, Sortino, Max Drawdown  
 
-📊 Backtesting & Performance
+---
 
-backtest_engine.py runs simulated trades using historical data.
-Generates:
-	•	strategy_performance.png → AI vs Market growth curve
-	•	backtest_results.csv → detailed log
-	•	Key metrics: Total Return %, Sharpe Ratio, Max Drawdown
+## 🧰 AI Tech Stack
+| Layer | Tools |
+|-------|-------|
+| Data Source | Yahoo Finance (yfinance) |
+| Feature Engine | pandas-ta, ta, NumPy, SciPy |
+| Machine Learning | XGBoost, LightGBM, CatBoost |
+| Reinforcement Learning | Stable-Baselines (PPO / DQN) |
+| Optimization | Optuna, HyperOpt |
+| Backtesting & Reports | Backtrader, QuantStats, Matplotlib |
+| Automation | ai_automation.py + Render auto-deploy |
+| API | Flask (REST) |
 
-⸻
+---
 
-🧩 AI Tech Stack
-
-Machine Learning: XGBoost, LightGBM, CatBoost
-Reinforcement Learning: Stable-Baselines (PPO / DQN)
-Optimization: Optuna, HyperOpt
-Feature Analysis: pandas-ta, ta, NumPy, SciPy
-Backtesting & Reports: Backtrader, QuantStats, Matplotlib
-Automation & Orchestration: ai_automation.py + Render env loops
-
-⸻
-
-🕒 Keep Alive Tip
-
-Add an UptimeRobot ping every 15 min to keep Render service awake:
+## 🕒 Keep Alive (Optional)
+Add a free UptimeRobot ping every 15 minutes:  
 https://xauusd-ai-trader.onrender.com/
 
-⸻
+---
 
-🧾 API Summary
+## 🧾 API Summary
+| Endpoint | Method | Description |
+|-----------|---------|-------------|
+| / | GET | Health check |
+| /run | GET | Generate hourly signal |
+| /run_daily | GET | Generate daily signal |
+| /history | GET | Fetch recent signal logs |
 
-/ — GET — Health check
-/run — GET — Generate hourly signal
-/run_daily — GET — Generate daily signal
-/history — GET — Fetch recent signals
+---
 
-⸻
+## 🧠 Future Expansion
+- Multi-asset support (XAGUSD, EURUSD, BTCUSD)  
+- News sentiment ingestion (Twitter, Bloomberg, Fed statements)  
+- Agentic portfolio management  
+- MetaTrader 5 / cTrader webhook integration  
 
-📜 License
+---
 
-MIT License © 2025 – Anirudh Vyas
+## 📜 License
+MIT License © 2025 – Anirudh Vyas  
 
-⸻
+---
 
-👨‍💻 Author
-
-Developed by: Anirudh Vyas
-Purpose: Build a self-learning AI quant ecosystem for precision XAUUSD trading using ML + RL automation.
-
-
-
-
+## 👨‍💻 Author
+Developed by: **Anirudh Vyas**  
+Purpose: Build a self-learning, adaptive AI quant ecosystem for precision XAUUSD trading — blending ML, RL, and Agentic AI automation.
 
 
