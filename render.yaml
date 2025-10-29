@@ -2,13 +2,28 @@ services:
   - type: web
     name: xauusd-ai-trader
     env: python
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
     startCommand: "python main.py"
     plan: free
+    autoDeploy: true
     envVars:
       - key: INFER_INTERVAL_SECS
-        value: 3600            # run inference every 1 hour
-      - key: DATA_PATH
-        value: data/XAU_USD_Historical_Data.csv   # your price data
+        value: 3600               # 1-hour inference refresh
+      - key: DAILY_REFRESH
+        value: true               # run daily signal update
+      - key: DATA_DIR
+        value: data               # folder containing historical datasets
+      - key: DATA_PATH_DAILY
+        value: data/XAU_USD_Historical_Data_daily.csv
+      - key: DATA_PATH_WEEKLY
+        value: data/XAU_USD_Historical_Data_weekly.csv
+      - key: DATA_PATH_MONTHLY
+        value: data/XAU_USD_Historical_Data_monthly.csv
+      - key: MODEL_SAVE_PATH
+        value: models/best_model.pkl
+      - key: LOG_PATH
+        value: logs/app.log
       - key: PORT
-        value: 10000           # required for Flask on Render
+        value: 10000              # required by Render for Flask/FastAPI
