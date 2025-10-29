@@ -1,49 +1,71 @@
+import os
 import pandas as pd
 import joblib
 import datetime
 import json
+import numpy as np
 
-# Load historical feature dataset
-data = pd.read_csv('features_full_daily.csv')
+# =========================================
+# ⚡ XAUUSD AI Inference Engine
+# =========================================
+# Loads trained model + recent features
+# Generates BUY/SELL signal with confidence
+# For both hourly and daily inference use
+# =========================================
 
-# Load trained Random Forest model
-model = joblib.load('model.pkl')
+# --- Configurable Paths ---
+FEATURE_PATH = os.getenv("FEATURE_FILE", "features_full_daily.csv")
+MODEL_PATH = os.getenv("MODEL_SAVE_PATH", "models/rf_model.joblib")
 
-# Get the latest row of data
-last = data.iloc[-1]
+# --- Load Data ---
+if not os.path.exists(FEATURE_PATH):
+    raise FileNotFoundError(f"❌ Feature file not found: {FEATURE_PATH}")
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(f"❌ Model file not found: {MODEL_PATH}")
 
-# Extract feature columns
-features = ['ema21', 'ema50', 'atr14']
-X_latest = last[features].values.reshape(1, -1)
+data = pd.read_csv(FEATURE_PATH)
+model = joblib.load(MODEL_PATH)
 
-# Predict the next move (1 = BUY, 0 = SELL)
-prediction = model.predict(X_latest)[0]
-probability = model.predict_proba(X_latest)[0][prediction]
+# --- Extract features dynamically ---
+feature_cols = [c for c in data.columns if c.startswith(("ema", "atr", "rsi", "volatility", "momentum"))]
+if not feature_cols:
+    feature_cols = ['ema21', 'ema50', 'atr14']
 
-# Current price
-current_price = float(last['price'])
+# --- Get the most recent valid row ---
+last = data.dropna().iloc[-1]
+X_latest = last[feature_cols].values.reshape(1, -1)
 
-# Define signal and entries
+# --- Predict next move (1 = BUY, 0 = SELL) ---
+prediction = int(model.predict(X_latest)[0])
+probabilities = model.predict_proba(X_latest)[0]
+confidence = float(np.max(probabilities))
+
+# --- Current price ---
+price = float(last['price'])
+
+# --- Define entries & targets ---
 if prediction == 1:
     signal = "BUY"
-    conservative_entry = current_price * 0.998
-    aggressive_entry = current_price * 1.002
-    safer_entry = (conservative_entry + current_price) / 2
-    take_profit = current_price * 1.008
-    stop_loss = current_price * 0.994
+    conservative_entry = price * 0.998
+    aggressive_entry = price * 1.002
+    safer_entry = (conservative_entry + price) / 2
+    take_profit = price * 1.008
+    stop_loss = price * 0.994
 else:
     signal = "SELL"
-    conservative_entry = current_price * 1.002
-    aggressive_entry = current_price * 0.998
-    safer_entry = (conservative_entry + current_price) / 2
-    take_profit = current_price * 0.992
-    stop_loss = current_price * 1.006
+    conservative_entry = price * 1.002
+    aggressive_entry = price * 0.998
+    safer_entry = (conservative_entry + price) / 2
+    take_profit = price * 0.992
+    stop_loss = price * 1.006
 
-# Package result as JSON
+# --- Prepare JSON Output ---
 result = {
     "timestamp": datetime.datetime.utcnow().isoformat(),
+    "timeframe": "daily",
     "signal": signal,
-    "confidence": round(float(probability), 4),
+    "confidence": round(confidence, 4),
+    "current_price": round(price, 2),
     "conservative_entry": round(conservative_entry, 2),
     "aggressive_entry": round(aggressive_entry, 2),
     "safer_entry": round(safer_entry, 2),
@@ -51,5 +73,12 @@ result = {
     "stop_loss": round(stop_loss, 2)
 }
 
-# Print formatted JSON output
+# --- Output JSON to console (Render logs / API bridge) ---
 print(json.dumps(result, indent=2))
+
+# --- Save last inference to history file ---
+os.makedirs("history", exist_ok=True)
+with open("history/inference_log.json", "a") as log:
+    log.write(json.dumps(result) + "\n")
+
+print(f"✅ Signal generated successfully at {result['timestamp']}")
