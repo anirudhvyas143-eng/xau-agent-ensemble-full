@@ -3,13 +3,13 @@ Flask-Cors==4.0.0
 gunicorn==23.0.0
 
 pandas==2.2.3
-numpy==2.1.1
+numpy>=1.26.0,<3.0
 scipy==1.14.1
 
 scikit-learn==1.5.2
 xgboost==2.1.2
 lightgbm==4.4.0
-# catboost==1.2.5   # ❌ disabled for Render Free env (requires Rust/Cargo)
+# catboost==1.2.5   # disabled for Render Free env (Rust/Cargo issue)
 
 optuna==4.0.0
 hyperopt==0.2.7
