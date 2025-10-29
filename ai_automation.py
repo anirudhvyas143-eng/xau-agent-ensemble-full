@@ -17,6 +17,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.envs import DummyVecEnv
 import gymnasium as gym
 from drift_manager import detect_model_drift
+from strategy_manager import select_strategy
 
 # ===============================
 # CONFIGURATION
@@ -146,28 +147,53 @@ def reinforcement_training(df):
     agent.save("models/ppo_agent.zip")
     logger.info("✅ PPO agent saved (models/ppo_agent.zip)")
 
-
 def generate_signal(df, model):
-    """Generates latest BUY/SELL signal."""
+    """Generates latest BUY/SELL signal using adaptive strategy."""
     last = df.iloc[-1]
     X_latest = last[["ema21", "ema50", "atr14"]].values.reshape(1, -1)
     prediction = model.predict(X_latest)[0]
     prob = model.predict_proba(X_latest)[0][prediction]
     price = float(last["close"])
 
+    # --- Select best-fit strategy dynamically ---
+    strategy = select_strategy(df)
+    logger.info(f"🎯 Selected Strategy: {strategy}")
+
+    # --- Adjust logic based on strategy ---
     if prediction == 1:
         signal = "BUY"
-        tp = price * 1.008
-        sl = price * 0.994
+        if strategy == "trend_following":
+            tp = price * 1.010
+            sl = price * 0.993
+        elif strategy == "range_trading":
+            tp = price * 1.004
+            sl = price * 0.996
+        elif strategy == "news_trading":
+            tp = price * 1.015
+            sl = price * 0.990
+        else:  # position_trading
+            tp = price * 1.020
+            sl = price * 0.985
         entry = price * 0.999
     else:
         signal = "SELL"
-        tp = price * 0.992
-        sl = price * 1.006
+        if strategy == "trend_following":
+            tp = price * 0.990
+            sl = price * 1.007
+        elif strategy == "range_trading":
+            tp = price * 0.996
+            sl = price * 1.004
+        elif strategy == "news_trading":
+            tp = price * 0.985
+            sl = price * 1.010
+        else:  # position_trading
+            tp = price * 0.980
+            sl = price * 1.015
         entry = price * 1.001
 
     result = {
         "timestamp": datetime.utcnow().isoformat(),
+        "strategy": strategy,
         "signal": signal,
         "confidence": round(float(prob), 4),
         "entry_price": round(entry, 2),
@@ -176,8 +202,9 @@ def generate_signal(df, model):
         "current_price": round(price, 2),
     }
 
-    logger.info(f"📈 Signal Generated: {result}")
+    logger.info(f"📈 Signal Generated ({strategy}): {result}")
     return result
+
 
 
 # ===============================
