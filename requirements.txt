@@ -14,7 +14,7 @@ lightgbm==4.4.0
 optuna==4.0.0
 hyperopt==0.2.7
 
-pandas-ta==0.3.14b
+pandas-ta==0.4.67b0
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
@@ -28,6 +28,5 @@ joblib==1.4.2
 tqdm==4.67.1
 requests==2.32.3
 
-# Optional AI Automation helpers
 psutil==6.1.0
 schedule==1.2.1
