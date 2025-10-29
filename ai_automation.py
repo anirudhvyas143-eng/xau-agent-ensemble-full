@@ -1,106 +1,156 @@
 """
-AI Automation Engine for XAUUSD Agent
--------------------------------------
-Runs hourly + daily retraining, backtesting, and signal logging.
-Integrates Quant Intelligence, Feature Engineering, and Model Drift Correction.
+AI AUTOMATION ENGINE — XAUUSD AI Trader
+---------------------------------------
+This script automatically:
+✅ Loads and cleans daily/weekly/monthly datasets
+✅ Trains and optimizes hybrid ML + RL ensemble
+✅ Generates hourly BUY/SELL signals with confidence
+✅ Backtests automatically and logs all results
+✅ Serves API endpoints for live inference (Flask)
 """
 
 import os
 import time
+import json
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import datetime
-from ensemble_train_retrain import model as train_model
-from ensemble_inferno_and_data import result as infer_signal
-from backtest_engine import compute_metrics
-import optuna
+import datetime
+from flask import Flask, jsonify
+from flask_cors import CORS
+from loguru import logger
+from apscheduler.schedulers.background import BackgroundScheduler
+
+# ML / RL / Optimization Imports
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import optuna
+from stable_baselines3 import PPO
+import gymnasium as gym
 
-DATA_FILE = "features_full_daily.csv"
-MODEL_PATH = "model.pkl"
-HISTORY_FILE = "signal_log.csv"
-BACKTEST_DIR = "backtests"
-os.makedirs(BACKTEST_DIR, exist_ok=True)
+# ===============================
+# CONFIG
+# ===============================
+DATA_PATH = os.getenv("DATA_PATH_DAILY", "data/XAU_USD_Historical_Data_daily.csv")
+MODEL_PATH = os.getenv("MODEL_SAVE_PATH", "models/best_model.pkl")
+LOG_PATH = os.getenv("LOG_PATH", "logs/app.log")
+INFER_INTERVAL = int(os.getenv("INFER_INTERVAL_SECS", 3600))  # every hour
 
-# --------------------------------------------
-# 🔁 Utility: Hyperparameter Optimization
-# --------------------------------------------
-def optimize_model(data):
-    def objective(trial):
-        n_estimators = trial.suggest_int("n_estimators", 100, 500)
-        max_depth = trial.suggest_int("max_depth", 3, 20)
-        min_samples_split = trial.suggest_int("min_samples_split", 2, 10)
-        model = RandomForestClassifier(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            random_state=42
-        )
-        X = data[['ema21', 'ema50', 'atr14']].fillna(method='bfill')
-        y = (data['price'].shift(-1) > data['price']).astype(int)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-        model.fit(X_train, y_train)
-        return model.score(X_test, y_test)
-    
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=15)
-    return study.best_params
+os.makedirs("models", exist_ok=True)
+os.makedirs("logs", exist_ok=True)
 
-# --------------------------------------------
-# 🧠 AI Reinforcement Update
-# --------------------------------------------
-def reinforcement_correction(prob, prev_outcome):
-    # Basic reward adjustment logic
-    if prev_outcome == 1:
-        return min(1.0, prob + 0.05)
-    else:
-        return max(0.0, prob - 0.05)
+logger.add(LOG_PATH, rotation="1 MB")
 
-# --------------------------------------------
-# 🚀 Main Routine
-# --------------------------------------------
-def run_ai_cycle():
-    print("\n🧠 Starting AI Retrain + Inference Cycle...")
-    
-    data = pd.read_csv(DATA_FILE)
-    best_params = optimize_model(data)
-    print(f"✅ Optimized Params: {best_params}")
+# ===============================
+# DATA PREPARATION
+# ===============================
+def load_and_prepare_data():
+    logger.info(f"Loading data from {DATA_PATH}...")
+    df = pd.read_csv(DATA_PATH)
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
-    # Retrain model
-    model = RandomForestClassifier(**best_params, random_state=42)
-    X = data[['ema21', 'ema50', 'atr14']].fillna(method='bfill')
-    y = (data['price'].shift(-1) > data['price']).astype(int)
-    model.fit(X, y)
+    if "close" not in df.columns:
+        if "price" in df.columns:
+            df.rename(columns={"price": "close"}, inplace=True)
+        elif "last" in df.columns:
+            df.rename(columns={"last": "close"}, inplace=True)
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.sort_values("date").dropna(subset=["close"])
+    df["return"] = df["close"].pct_change()
+    df["ema21"] = df["close"].ewm(span=21).mean()
+    df["ema50"] = df["close"].ewm(span=50).mean()
+    df["atr14"] = df["close"].pct_change().rolling(14).std() * 100
+    df = df.dropna()
+    return df
+
+# ===============================
+# MACHINE LEARNING TRAINING
+# ===============================
+def train_ml_model(df):
+    logger.info("Training Random Forest (Ensemble)...")
+    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
+    features = ["ema21", "ema50", "atr14"]
+    X, y = df[features], df["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    model = RandomForestClassifier(n_estimators=200, random_state=42)
+    model.fit(X_train, y_train)
+    acc = accuracy_score(y_test, model.predict(X_test))
     joblib.dump(model, MODEL_PATH)
-    print("✅ Model retrained successfully.")
+    logger.success(f"Model trained successfully with accuracy: {acc:.2%}")
+    return model, acc
 
-    # Run inference
-    last_row = X.iloc[-1].values.reshape(1, -1)
-    pred = model.predict(last_row)[0]
-    prob = model.predict_proba(last_row)[0][pred]
-    prob_adj = reinforcement_correction(prob, pred)
-    
-    signal = "BUY" if pred == 1 else "SELL"
-    timestamp = datetime.utcnow().isoformat()
+# ===============================
+# REINFORCEMENT LEARNING TUNER
+# ===============================
+class SimpleEnv(gym.Env):
+    def __init__(self, prices):
+        super(SimpleEnv, self).__init__()
+        self.prices = prices
+        self.action_space = gym.spaces.Discrete(2)  # 0 = SELL, 1 = BUY
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
+        self.current_step = 50
 
-    # Log to history
-    log_df = pd.DataFrame([[timestamp, signal, round(prob_adj, 4)]],
-                          columns=["timestamp", "signal", "confidence"])
-    log_df.to_csv(HISTORY_FILE, mode='a', index=False, header=not os.path.exists(HISTORY_FILE))
-    print(f"🪙 Signal: {signal} ({prob_adj:.2%})")
+    def reset(self, *, seed=None, options=None):
+        self.current_step = 50
+        return self._get_obs(), {}
 
-    # Backtest update
-    from backtest_engine import metrics as bt_metrics
-    print("📊 Backtest metrics:")
-    for k, v in bt_metrics.items():
-        print(f"   {k:15s}: {v:.2%}")
+    def _get_obs(self):
+        close = self.prices[self.current_step]
+        ema21 = np.mean(self.prices[self.current_step-21:self.current_step])
+        ema50 = np.mean(self.prices[self.current_step-50:self.current_step])
+        return np.array([close, ema21, ema50], dtype=np.float32)
 
-    print(f"Cycle complete ✅\n")
+    def step(self, action):
+        reward = 0
+        if self.current_step < len(self.prices) - 1:
+            price_change = self.prices[self.current_step + 1] - self.prices[self.current_step]
+            reward = price_change if action == 1 else -price_change
+        self.current_step += 1
+        done = self.current_step >= len(self.prices) - 1
+        return self._get_obs(), reward, done, False, {}
 
-if __name__ == "__main__":
-    while True:
-        run_ai_cycle()
-        # Run hourly (3600s), daily (24h) cycles can be handled by Render cron
-        time.sleep(3600)
+def train_rl_model(prices):
+    logger.info("Training Reinforcement Learning agent (PPO)...")
+    env = SimpleEnv(prices)
+    model = PPO("MlpPolicy", env, verbose=0)
+    model.learn(total_timesteps=20000)
+    model.save("models/rl_model.zip")
+    logger.success("RL model training completed successfully!")
+
+# ===============================
+# HYPERPARAMETER OPTIMIZATION
+# ===============================
+def objective(trial):
+    n_estimators = trial.suggest_int("n_estimators", 50, 300)
+    max_depth = trial.suggest_int("max_depth", 2, 12)
+    df = load_and_prepare_data()
+    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
+    features = ["ema21", "ema50", "atr14"]
+    X, y = df[features], df["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth)
+    model.fit(X_train, y_train)
+    acc = accuracy_score(y_test, model.predict(X_test))
+    return acc
+
+def optimize_model():
+    logger.info("Starting hyperparameter optimization with Optuna...")
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=10)
+    best_params = study.best_params
+    logger.success(f"Best parameters found: {best_params}")
+    return best_params
+
+# ===============================
+# SIGNAL GENERATION
+# ===============================
+def generate_signal(model, df):
+    latest = df.iloc[-1]
+    X_latest = latest[["ema21", "ema50", "atr14"]].values.reshape(1, -1)
+    prediction = model.predict(X_latest)[0]
+    prob = model.predict_proba(X_latest)[0][prediction]
+    price = float(latest["close"])
+
+    if prediction
