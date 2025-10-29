@@ -3,8 +3,9 @@ services:
     name: xauusd-ai-trader
     env: python
     buildCommand: |
-  pip install --upgrade pip
-  pip install --prefer-binary --no-build-isolation -r requirements.txt
+      pip install --upgrade pip
+      pip install --prefer-binary --no-build-isolation -r requirements.txt
+      mkdir -p data models logs
     startCommand: "python ai_automation.py"
     plan: free
     autoDeploy: true
@@ -26,4 +27,4 @@ services:
       - key: LOG_PATH
         value: logs/app.log
       - key: PORT
-        value: 10000              # required by Render for Flask/FastAPI
+        value: 10000              # required by Render
