@@ -16,6 +16,7 @@ import optuna
 from stable_baselines3 import PPO
 from stable_baselines3.common.envs import DummyVecEnv
 import gymnasium as gym
+from drift_manager import detect_model_drift
 
 # ===============================
 # CONFIGURATION
@@ -196,6 +197,7 @@ def inference_job():
     with open("latest_signal.json", "w") as f:
         json.dump(signal, f, indent=2)
     logger.info("💡 Latest signal saved to latest_signal.json")
+        detect_model_drift(df)
 
 
 # ===============================
