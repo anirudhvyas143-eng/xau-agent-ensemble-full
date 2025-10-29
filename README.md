@@ -1,152 +1,161 @@
-# 🦾 XAUUSD AI Trader Agent  
-AI-powered Gold (XAUUSD) signal generator that analyzes historical and live data, trains a Random Forest ML model, and generates BUY/SELL signals every 1 hour— fully deployable on Render’s free web service.
+🦾 XAUUSD AI Trader Agent — Hourly + Daily Hybrid
 
----
+Full-stack AI-powered Gold (XAUUSD) signal generator combining advanced ML, RL, and quantitative finance.
+Automatically trains, optimizes, backtests, and deploys BUY/SELL signals every hour and day — fully hosted on Render’s Free Plan.
 
-## ⚙️ Features  
-✅ Uses TradingView historical CSVs (daily, weekly, monthly)  
-✅ Generates AI-powered indicator set (EMA, RSI, ATR, Volatility, Momentum)  
-✅ Trains Random Forest model on multi-timeframe features  
-✅ Predicts next 1-hour price movement for XAUUSD  
-✅ Outputs AI signals with **conservative**, **aggressive**, and **safer** entries  
-✅ Fully automated refresh and deployment  
-✅ Flask web API for live integration with bots, dashboards, or alerts  
+⸻
 
----
+⚙️ Features
 
-## 📂 Project Directory Structure  
-```
-/data                  → CSV historical datasets (daily, weekly, monthly)  
-/models                → rf_model.joblib (auto-generated after training)  
-/main.py               → Core AI trading logic file  
-/requirements.txt      → Python dependencies list  
-/render.yaml           → Render web service configuration  
-/README.md             → Project overview, API documentation, and setup guide  
-```
+✅ Dual-Timeframe Prediction — Hourly & Daily Signals
+✅ Advanced Feature Engineering (EMA, ATR, RSI, Momentum, Volatility)
+✅ Automated Plan Optimization & Backtesting Loop
+✅ Financial Metrics + QuantStats Reports
+✅ Unsupervised Clustering for Market Regime Detection
+✅ Deep Reinforcement Learning for Adaptive Entry Logic
+✅ Model Drift Detection & Auto-Retraining
+✅ Hyperparameter Tuning with Optuna / HyperOpt
+✅ Flask Web API for bots, dashboards, or alerts
+✅ Deployed on Render with hourly and daily refresh automation
 
----
+⸻
 
-## 🚀 Deployment on Render  
+📂 Project Structure
 
-1️⃣ Push this repo to **GitHub**  
-2️⃣ Visit [Render.com](https://render.com) → “New Web Service”  
-3️⃣ Select your GitHub repository  
-4️⃣ **Choose Free Plan** and click **Deploy**  
-5️⃣ **Build & Start Commands:**
-```bash
+/data → Historical datasets (CSV: hourly, daily, weekly)
+/models → Saved ML and RL models (auto-generated)
+/main.py → Core AI trading logic
+/requirements.txt → Dependency list
+/render.yaml → Render deploy configuration
+/README.md → Documentation (this file)
+
+⸻
+
+🚀 One-Click Render Deployment
+
+1️⃣ Push this repo to GitHub
+2️⃣ Go to Render.com → “New Web Service”
+3️⃣ Select your GitHub repository
+4️⃣ Choose Free Plan and click Deploy
+5️⃣ Build & Start commands:
+
 pip install -r requirements.txt
 python main.py
-```
 
-6️⃣ Example `render.yaml`:
-```yaml
+6️⃣ Example render.yaml:
+
 services:
-  - type: web
-    name: xauusd-ai-trader
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
-    plan: free
-    envVars:
-      - key: INFER_INTERVAL_SECS
-        value: 3600  # every 1 hour
-```
+	•	type: web
+name: xauusd-ai-trader
+env: python
+buildCommand: “pip install -r requirements.txt”
+startCommand: “python main.py”
+plan: free
+envVars:
+	•	key: INFER_INTERVAL_SECS
+value: 3600  # every 1 hour
+	•	key: DAILY_REFRESH_SECS
+value: 86400  # every 1 day
 
----
+⸻
 
-## 🌐 API Endpoints  
-
-### 🔹 1. Health Check  
-**GET** `https://<your-app-name>.onrender.com/`  
-**Response:**
-```json
+🌐 API Endpoints
+	1.	Health Check
+GET → https://.onrender.com/
+Response:
 {
-  "status": "ok",
-  "time": "2025-10-28T18:30:00Z",
-  "message": "XAUUSD AI Trader active and monitoring"
+“status”: “ok”,
+“time”: “2025-10-29T06:00Z”,
+“message”: “XAUUSD AI Trader active (hourly + daily)”
 }
-```
-
----
-
-### 🔹 2. Run AI Signal Generation  
-**GET** `https://<your-app-name>.onrender.com/run`  
-**Response:**
-```json
+	2.	Run AI Signal Generation
+GET → https://.onrender.com/run
+Response:
 {
-  "status": "ok",
-  "result": {
-    "timestamp": "2025-10-28T18:32:15Z",
-    "signal": "BUY",
-    "confidence": 0.87,
-    "conservative_entry": 2378.2,
-    "aggressive_entry": 2385.7,
-    "safer_entry": 2375.6,
-    "take_profit": 2398.0,
-    "stop_loss": 2365.0
-  }
+“status”: “ok”,
+“result”: {
+“timestamp”: “2025-10-29T06:02Z”,
+“timeframe”: “1H”,
+“signal”: “BUY”,
+“confidence”: 0.92,
+“conservative_entry”: 2382.4,
+“aggressive_entry”: 2386.1,
+“safer_entry”: 2379.8,
+“take_profit”: 2401.2,
+“stop_loss”: 2368.9
 }
-```
-
----
-
-### 🔹 3. Historical Signal Log  
-**GET** `https://<your-app-name>.onrender.com/history`  
-**Response:**
-```json
+}
+	3.	Daily Signal Run
+GET → https://.onrender.com/run_daily
+Response:
 {
-  "history": [
-    {"time": "2025-10-27T14:00Z", "signal": "BUY", "price": 2372.4},
-    {"time": "2025-10-27T18:00Z", "signal": "HOLD", "price": 2381.1},
-    {"time": "2025-10-28T02:00Z", "signal": "SELL", "price": 2369.7}
-  ]
+“status”: “ok”,
+“result”: {
+“timestamp”: “2025-10-29T06:05Z”,
+“timeframe”: “1D”,
+“signal”: “SELL”,
+“confidence”: 0.88
 }
-```
+}
+	4.	Signal History
+GET → https://.onrender.com/history
+Response:
+{
+“history”: [
+{“time”: “2025-10-28T20:00Z”, “tf”: “1H”, “signal”: “BUY”, “price”: 2378.3},
+{“time”: “2025-10-28”, “tf”: “1D”, “signal”: “SELL”, “price”: 2369.5}
+]
+}
 
----
+⸻
 
-## 🧠 Entry Logic  
-| Entry Type   | Description             | Strategy Use          |
-|---------------|-------------------------|------------------------|
-| Aggressive    | High-risk, high-reward  | Intraday / Scalping   |
-| Conservative  | Balanced entry          | Swing trading         |
-| Safer         | Low-risk confirmation   | Position trades       |
+🧠 Entry Logic
 
----
+Aggressive → High risk / high reward (scalping, intraday)
+Conservative → Balanced (swing trading)
+Safer → Low risk (position trades)
 
-## 🕒 Keep Alive  
-Use **[UptimeRobot](https://uptimerobot.com)** to ping your app every 15 minutes:  
-`https://<your-app-name>.onrender.com/`
+⸻
 
----
+🧩 AI Modules Used
 
-## 📜 License  
-**MIT License © 2025 – Anirudh Vyas**
+• Automated Plan Optimization — Optuna + RL fine-tuning
+• Backtesting & Metrics — Backtrader + QuantStats
+• Feature Engineering — EMA, RSI, ATR, Volatility, Momentum
+• Unsupervised Learning — KMeans for Market Regime Detection
+• Reinforcement Learning — Stable-Baselines3 (PPO/DQN)
+• Hyperparameter Tuning — Optuna / HyperOpt
+• Model Drift Detection — Auto-retrain when accuracy drops
+• Exploratory Data Analysis — Automatic EDA before retraining
 
----
+⸻
 
-## 🧩 Usage Notes  
-- Default interval: **4 hours** (`INFER_INTERVAL_SECS` in Render dashboard).  
-- CSV data must exist in `/data` before first run.  
-- Auto-retrains model when `/run` detects new data.  
-- Logs signals automatically to `/history`.  
+🕒 Keep Alive
 
----
+Use UptimeRobot to ping your app every 15 minutes:
+https://.onrender.com/
 
-## 🧾 API Summary  
-| Endpoint | Method | Description |
-|-----------|---------|-------------|
-| `/` | GET | Health check |
-| `/run` | GET/POST | Generate new AI signals |
-| `/history` | GET | Retrieve past signals |
+⸻
 
----
+🧾 API Summary
 
-## 👨‍💻 Author  
-**Developed by:** Anirudh Vyas  
-**Year:** 2025  
-**Purpose:** AI-powered quantitative trading system for accurate and continuous XAUUSD signal generation.
+/ → GET → Health check
+/run → GET → Generate hourly signal
+/run_daily → GET → Generate daily signal
+/history → GET → Retrieve signal history
 
+⸻
+
+📜 License
+
+MIT License © 2025 – Anirudh Vyas
+
+⸻
+
+👨‍💻 Author
+
+Developed by: Anirudh Vyas
+Purpose: Next-gen AI quant ecosystem for precision XAUUSD signal generation — hourly and daily, optimized via ML + RL automation.
 
 
 
