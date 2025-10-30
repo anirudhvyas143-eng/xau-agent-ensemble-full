@@ -1,18 +1,20 @@
 import os
+import shutil
+import joblib
 import pandas as pd
 import numpy as np
-import joblib
+import optuna
+from loguru import logger
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
-from loguru import logger
-import optuna
 
 # =========================================
 # ⚙️ CONFIG
 # =========================================
 DATA_DIR = "data"
 MODEL_PATH = "models/ensemble_model.pkl"
+BACKUP_PATH = "models/ensemble_model_backup.pkl"
 LOG_PATH = "logs/ensemble_train.log"
 
 os.makedirs("models", exist_ok=True)
@@ -61,18 +63,13 @@ def prepare_data(df):
 # =========================================
 def optimize_rf(X, y):
     def objective(trial):
-        n_estimators = trial.suggest_int("n_estimators", 100, 400)
-        max_depth = trial.suggest_int("max_depth", 3, 20)
-        min_samples_split = trial.suggest_int("min_samples_split", 2, 10)
-        min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 5)
-        model = RandomForestClassifier(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            random_state=42,
-            n_jobs=-1
-        )
+        params = {
+            "n_estimators": trial.suggest_int("n_estimators", 100, 400),
+            "max_depth": trial.suggest_int("max_depth", 3, 20),
+            "min_samples_split": trial.suggest_int("min_samples_split", 2, 10),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 5),
+        }
+        model = RandomForestClassifier(**params, random_state=42, n_jobs=-1)
         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, shuffle=False)
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
@@ -90,8 +87,9 @@ def optimize_rf(X, y):
 def train_ensemble():
     df = load_all_features()
     X, y, features = prepare_data(df)
-    logger.info(f"📊 Training on {len(X)} samples, {len(features)} features")
+    logger.info(f"📊 Training on {len(X)} samples with {len(features)} features")
 
+    # Optimize RandomForest via Optuna
     best_rf_params = optimize_rf(X, y)
     logger.info(f"🏆 Best RF Params: {best_rf_params}")
 
@@ -109,16 +107,47 @@ def train_ensemble():
     preds = ensemble.predict(X_test)
     acc = accuracy_score(y_test, preds)
 
-    os.makedirs("models", exist_ok=True)
-    joblib.dump({"model": ensemble, "features": features}, MODEL_PATH)
+    # Save model safely
+    try:
+        if os.path.exists(MODEL_PATH):
+            shutil.copy(MODEL_PATH, BACKUP_PATH)
+            logger.info("📦 Previous model backed up before overwrite.")
+        joblib.dump({"model": ensemble, "features": features}, MODEL_PATH)
+        logger.success(f"✅ Ensemble model trained and saved → {MODEL_PATH}")
+        logger.info(f"📈 Accuracy: {acc:.4f}")
+    except Exception as e:
+        logger.error(f"❌ Failed to save model: {e}")
+        if os.path.exists(BACKUP_PATH):
+            shutil.copy(BACKUP_PATH, MODEL_PATH)
+            logger.warning("♻️ Rolled back to previous model due to save error.")
+        return None
 
-    logger.success(f"✅ Ensemble model trained and saved → {MODEL_PATH}")
-    logger.info(f"📈 Accuracy: {acc:.4f}")
     logger.info("\n" + classification_report(y_test, preds))
     return acc
 
 
+# =========================================
+# 🔁 Retrain if drift detected (Integration)
+# =========================================
+def retrain_if_drift_detected(drift_detected: bool):
+    if drift_detected:
+        logger.warning("⚠️ Drift detected — retraining ensemble model...")
+        try:
+            acc = train_ensemble()
+            logger.success(f"✅ Retraining complete — New Accuracy: {acc:.4f}")
+        except Exception as e:
+            logger.error(f"❌ Retraining failed: {e}")
+            if os.path.exists(BACKUP_PATH):
+                shutil.copy(BACKUP_PATH, MODEL_PATH)
+                logger.warning("♻️ Rolled back to backup model.")
+    else:
+        logger.info("✅ No drift detected — no retraining needed.")
+
+
+# =========================================
+# 🚀 Entry Point
+# =========================================
 if __name__ == "__main__":
-    logger.info("🚀 Starting Ensemble Model Training ...")
+    logger.info("🚀 Starting Ensemble Model (Train / Retrain)...")
     accuracy = train_ensemble()
     logger.info(f"🏁 Final Accuracy: {accuracy:.4f}")
