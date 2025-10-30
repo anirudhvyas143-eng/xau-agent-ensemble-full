@@ -5,6 +5,7 @@ import pandas as pd
 from textblob import TextBlob
 import requests
 import datetime
+import logging
 
 # === STRATEGY 1: Trend Following ===
 def trend_following(df):
@@ -42,10 +43,10 @@ def position_trading(macro_data):
 # === STRATEGY 4: News / Sentiment Trading ===
 def news_sentiment_strategy():
     try:
-        # Example free news API (you can later link to NewsAPI or Marketaux)
+        # Example free news API (you can later replace with Marketaux or NewsAPI key)
         url = "https://newsapi.org/v2/everything?q=gold+XAUUSD&apiKey=demo"
         articles = requests.get(url, timeout=10).json().get("articles", [])
-        headlines = " ".join(a["title"] for a in articles if "title" in a)
+        headlines = " ".join(a.get("title", "") for a in articles)
         sentiment = TextBlob(headlines).sentiment.polarity
         if sentiment > 0.2:
             return "BUY", f"Positive Sentiment ({sentiment:.2f})"
@@ -56,7 +57,7 @@ def news_sentiment_strategy():
     except Exception as e:
         return "HOLD", f"News Error: {e}"
 
-# === FINAL STRATEGY AGGREGATOR ===
+# === STRATEGY 5: Combined Aggregator ===
 def combined_signal(df, macro_data):
     trend_sig, trend_reason = trend_following(df)
     range_sig, range_reason = range_trading(df)
@@ -81,3 +82,49 @@ def combined_signal(df, macro_data):
     }
 
     return final, summary
+
+
+# === STRATEGY SELECTION ENGINE (for ai_automation.py) ===
+def select_strategy(df):
+    """
+    Dynamically select which strategy to emphasize based on market condition.
+    Returns one of:
+    - 'trend_following'
+    - 'range_trading'
+    - 'news_trading'
+    - 'position_trading'
+    - 'default'
+    """
+
+    try:
+        if len(df) < 50:
+            return "default"
+
+        # Calculate key metrics
+        df["ema20"] = df["close"].ewm(span=20).mean()
+        df["ema50"] = df["close"].ewm(span=50).mean()
+        ema_diff = abs(df["ema20"].iloc[-1] - df["ema50"].iloc[-1])
+        price_std = df["close"].tail(50).std()
+        avg_price = df["close"].tail(50).mean()
+        volatility = price_std / avg_price * 100
+
+        # Volatility & trend logic
+        if ema_diff / df["close"].iloc[-1] > 0.005 and volatility > 1.0:
+            return "trend_following"
+        elif volatility < 0.5:
+            return "range_trading"
+
+        # Check if there are major market-moving news (simulated logic)
+        current_hour = datetime.datetime.utcnow().hour
+        if current_hour in [12, 13, 14]:  # e.g., during NY market hours
+            return "news_trading"
+
+        # Position trading for macro or longer trend scenarios
+        if len(df) > 200 and volatility < 1.5:
+            return "position_trading"
+
+        return "default"
+
+    except Exception as e:
+        logging.warning(f"select_strategy failed: {e}")
+        return "default"
