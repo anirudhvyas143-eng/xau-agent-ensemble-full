@@ -15,8 +15,11 @@ FILES = {
 }
 YF_SYMBOL = "GC=F"  # Gold futures symbol
 
-# === Step 1: Auto-fetch if not present ===
+# =====================================================
+# 📡 STEP 1: Auto-fetch data if not present
+# =====================================================
 def fetch_from_yahoo():
+    """Download and cache multi-timeframe gold data."""
     os.makedirs(DATA_DIR, exist_ok=True)
     logger.info(f"📡 Fetching fresh data for {YF_SYMBOL} ...")
 
@@ -24,12 +27,14 @@ def fetch_from_yahoo():
         "daily": ("25y", "1d"),
         "weekly": ("25y", "1wk"),
         "monthly": ("25y", "1mo"),
-        "hourly": ("2y", "1h")  # <= FIXED: limit hourly to 2 years
+        "hourly": ("2y", "1h")  # ✅ FIXED: hourly restricted to 2 years
     }
 
     for tf, (period, interval) in intervals.items():
         try:
+            logger.info(f"⬇️ Fetching {tf} data ({period}, {interval})...")
             df = yf.download(YF_SYMBOL, period=period, interval=interval, progress=False)
+
             if df.empty:
                 logger.warning(f"⚠️ {tf.capitalize()} data fetch failed for {YF_SYMBOL}.")
                 continue
@@ -37,12 +42,12 @@ def fetch_from_yahoo():
             df.reset_index(inplace=True)
             df.rename(columns=lambda x: x.strip().capitalize(), inplace=True)
 
-            # Ensure Close column
-            if "Close" not in df.columns and "Adj Close" in df.columns:
-                df.rename(columns={"Adj Close": "Close"}, inplace=True)
-
+            # ✅ Ensure Close column presence
             if "Close" not in df.columns:
-                logger.warning(f"⚠️ No 'Close' column found in {tf} data. Columns: {df.columns}")
+                if "Adj Close" in df.columns:
+                    df.rename(columns={"Adj Close": "Close"}, inplace=True)
+                else:
+                    df["Close"] = df.iloc[:, 0]  # fallback to first numeric column
 
             file_path = os.path.join(DATA_DIR, FILES[tf])
             df.to_csv(file_path, index=False)
@@ -50,17 +55,21 @@ def fetch_from_yahoo():
         except Exception as e:
             logger.error(f"❌ Error fetching {tf} data: {e}")
 
-# === Step 2: Load + clean + feature engineer ===
+
+# =====================================================
+# 🧠 STEP 2: Load, clean, and feature engineer
+# =====================================================
 def load_and_prepare():
-    """Load, clean, and feature-engineer multi-timeframe datasets."""
+    """Load, clean, and compute basic technical indicators for multi-timeframes."""
     datasets = {}
 
-    # Auto-fetch missing files
+    # --- Auto-fetch if missing ---
     missing = [f for f in FILES.values() if not os.path.exists(os.path.join(DATA_DIR, f))]
     if missing:
-        logger.warning(f"Missing data files: {missing}. Fetching automatically...")
+        logger.warning(f"⚠️ Missing data files: {missing}. Fetching automatically...")
         fetch_from_yahoo()
 
+    # --- Load each timeframe ---
     for tf, fname in FILES.items():
         path = os.path.join(DATA_DIR, fname)
         if not os.path.exists(path):
@@ -70,16 +79,18 @@ def load_and_prepare():
         print(f"📥 Loading {tf.upper()} data from {path} ...")
         df = pd.read_csv(path)
 
-        # --- Normalize Columns ---
+        # --- Normalize columns ---
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-        df = df.rename(columns={
+        rename_map = {
             "price": "close",
             "last": "close",
-            "timestamp": "date"
-        })
+            "timestamp": "date",
+            "datetime": "date"
+        }
+        df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns}, inplace=True)
 
         # --- Date conversion ---
-        for col in ["date", "datetime", "time"]:
+        for col in ["date", "time"]:
             if col in df.columns:
                 df["date"] = pd.to_datetime(df[col], errors="coerce")
                 break
@@ -87,12 +98,12 @@ def load_and_prepare():
         df = df.sort_values("date").dropna(subset=["date"])
         df.set_index("date", inplace=True)
 
-        # --- Ensure close exists ---
+        # --- Ensure 'close' exists ---
         if "close" not in df.columns:
             logger.error(f"❌ Missing 'close' column in {fname}. Columns found: {df.columns}")
             continue
 
-        # --- Technical Indicators ---
+        # --- Compute base technicals ---
         try:
             df["return"] = df["close"].pct_change()
             df["ema_20"] = ta.trend.ema_indicator(df["close"], window=20)
@@ -108,21 +119,22 @@ def load_and_prepare():
             df["volatility"] = df["close"].pct_change().rolling(10).std()
             df["momentum"] = ta.momentum.roc(df["close"], window=5)
         except Exception as e:
-            logger.error(f"Error computing indicators for {tf}: {e}")
+            logger.error(f"⚠️ Error computing indicators for {tf}: {e}")
             continue
 
-        # --- Drop incomplete rows ---
-        df = df.dropna()
-
-        # --- Add timeframe label ---
+        # --- Clean ---
+        df.dropna(inplace=True)
         df["timeframe"] = tf
 
         datasets[tf] = df
-        print(f"✅ {tf.upper()} data ready → {len(df)} rows, features: {len(df.columns)}")
+        print(f"✅ {tf.upper()} ready → {len(df)} rows | {len(df.columns)} features")
 
     return datasets
 
 
+# =====================================================
+# 🧾 RUN DIRECTLY
+# =====================================================
 if __name__ == "__main__":
     data = load_and_prepare()
     for tf, df in data.items():
