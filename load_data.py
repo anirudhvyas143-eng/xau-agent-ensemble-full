@@ -10,35 +10,39 @@ DATA_DIR = "data"
 FILES = {
     "daily": "XAU_USD_Historical_Data_daily.csv",
     "weekly": "XAU_USD_Historical_Data_weekly.csv",
-    "monthly": "XAU_USD_Historical_Data_monthly.csv"
+    "monthly": "XAU_USD_Historical_Data_monthly.csv",
+    "hourly": "XAU_USD_Historical_Data_hourly.csv"
 }
 YF_SYMBOL = "GC=F"  # Gold futures symbol
 
 # === Step 1: Auto-fetch if not present ===
 def fetch_from_yahoo():
     os.makedirs(DATA_DIR, exist_ok=True)
-
-    logger.info(f"Fetching fresh data for {YF_SYMBOL} ...")
+    logger.info(f"📡 Fetching fresh data for {YF_SYMBOL} ...")
 
     intervals = {
         "daily": ("25y", "1d"),
         "weekly": ("25y", "1wk"),
-        "monthly": ("25y", "1mo")
+        "monthly": ("25y", "1mo"),
+        "hourly": ("2y", "1h")  # <= FIXED: limit hourly to 2 years
     }
 
     for tf, (period, interval) in intervals.items():
         try:
-            df = yf.download(YF_SYMBOL, period=period, interval=interval)
+            df = yf.download(YF_SYMBOL, period=period, interval=interval, progress=False)
             if df.empty:
-                logger.warning(f"{tf.capitalize()} data fetch failed for {YF_SYMBOL}.")
+                logger.warning(f"⚠️ {tf.capitalize()} data fetch failed for {YF_SYMBOL}.")
                 continue
 
             df.reset_index(inplace=True)
             df.rename(columns=lambda x: x.strip().capitalize(), inplace=True)
 
-            # Ensure 'Close' column exists
+            # Ensure Close column
             if "Close" not in df.columns and "Adj Close" in df.columns:
                 df.rename(columns={"Adj Close": "Close"}, inplace=True)
+
+            if "Close" not in df.columns:
+                logger.warning(f"⚠️ No 'Close' column found in {tf} data. Columns: {df.columns}")
 
             file_path = os.path.join(DATA_DIR, FILES[tf])
             df.to_csv(file_path, index=False)
