@@ -6,17 +6,18 @@ import pandas as pd
 from loguru import logger
 from sklearn.metrics import accuracy_score
 from datetime import datetime
+from ensemble_train_retrain import retrain_if_drift_detected  # 🔗 Auto-retrain integration
 
 # === CONFIG ===
 MODEL_PATH = "models/best_model.pkl"
 BACKUP_PATH = "models/model_backup.pkl"
 DATA_PATH = "data/XAU_USD_Historical_Data_daily.csv"
 DRIFT_LOG = "logs/drift_log.csv"
-DRIFT_THRESHOLD = 0.05  # 5% accuracy drop triggers rollback
+DRIFT_THRESHOLD = 0.05  # 5% accuracy drop triggers retrain or rollback
 
 # === MAIN FUNCTION ===
 def detect_model_drift(new_data: pd.DataFrame):
-    """Detect and handle model drift — auto-rollback or backup if needed."""
+    """Detect and handle model drift — auto-retrain or rollback for accuracy protection."""
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
 
@@ -62,15 +63,24 @@ def detect_model_drift(new_data: pd.DataFrame):
     new_entry.to_csv(DRIFT_LOG, mode="a", header=not os.path.exists(DRIFT_LOG), index=False)
 
     # === Drift detection logic ===
+    drift_detected = False
     if prev_acc and (prev_acc - acc) > DRIFT_THRESHOLD:
+        drift_detected = True
         logger.warning(f"⚠️ Model drift detected! Drop: {(prev_acc - acc):.2%}")
-        if os.path.exists(BACKUP_PATH):
-            shutil.copy(BACKUP_PATH, MODEL_PATH)
-            logger.success("✅ Model rollback completed using backup.")
-        else:
-            logger.error("❌ No backup found — rollback skipped.")
+
+        try:
+            # 🔁 Auto retrain ensemble model
+            retrain_if_drift_detected(drift_detected)
+            logger.success("🤖 Auto-retrain triggered successfully.")
+        except Exception as e:
+            logger.error(f"⚠️ Retrain failed, attempting rollback: {e}")
+            if os.path.exists(BACKUP_PATH):
+                shutil.copy(BACKUP_PATH, MODEL_PATH)
+                logger.success("✅ Model rollback completed using backup.")
+            else:
+                logger.error("❌ No backup found — rollback skipped.")
     else:
-        logger.info("✅ Model accuracy within safe range.")
+        logger.info("✅ Model accuracy within safe range — no retrain required.")
 
     # === Update stable model backup ===
     try:
