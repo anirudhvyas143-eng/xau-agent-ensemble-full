@@ -1,39 +1,55 @@
 --extra-index-url https://pypi.anaconda.org/conda-forge/simple
 
-# Core web
+# =========================================================
+# ✅ CORE WEB / API
+# =========================================================
 Flask==3.0.3
 Flask-Cors==4.0.0
 gunicorn==23.0.0
 requests==2.32.3
 
-# Data / numerics (compatible wheels for Python 3.10)
+# =========================================================
+# ✅ CORE DATA / NUMERICS
+# =========================================================
 pandas==2.2.3
 numpy==1.26.4
 scipy==1.13.1
 
-# ML / optimization
+# =========================================================
+# ✅ MACHINE LEARNING / OPTIMIZATION
+# =========================================================
 scikit-learn==1.5.2
 xgboost==2.1.2
 lightgbm==4.4.0
 optuna==4.0.0
 hyperopt==0.2.7
 
-# Technical analysis / backtesting (avoid pandas-ta GitHub install to prevent auth/404 issues)
+# =========================================================
+# ✅ TECHNICAL ANALYSIS / BACKTESTING
+# =========================================================
+# pandas-ta skipped to avoid GitHub 404 or auth issues
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
 
-# RL optional
+# =========================================================
+# ✅ REINFORCEMENT LEARNING (CPU-SAFE)
+# =========================================================
 stable-baselines3==2.3.2
 gymnasium==0.29.1
+torch==2.9.0 --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Utilities
+# =========================================================
+# ✅ UTILITIES / LOGGING / SCHEDULING
+# =========================================================
 joblib==1.4.2
 tqdm==4.67.1
 psutil==6.1.0
 schedule==1.2.1
 loguru==0.7.2
 
-# Market data helpers
+# =========================================================
+# ✅ MARKET DATA APIs
+# =========================================================
 alpha_vantage==2.3.1
 investpy==1.0.8
