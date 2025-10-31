@@ -1,32 +1,44 @@
+# ---- Core Web Framework ----
 Flask==3.0.3
 Flask-Cors==4.0.0
 gunicorn==23.0.0
 
+# ---- Data & Math ----
 pandas>=2.3.2,<3.0
 numpy>=1.26.0,<3.0
 scipy==1.14.1
 
+# ---- ML / AI Models ----
 scikit-learn==1.5.2
 xgboost==2.1.2
 lightgbm==4.4.0
-# catboost==1.2.5   # disabled for Render Free env (Rust/Cargo issue)
+# catboost==1.2.5  # (optional) disabled due to Rust build on Render Free
 
+# ---- Optimization / Hyperparameter Tuning ----
 optuna==4.0.0
 hyperopt==0.2.7
 
+# ---- Technical Analysis / Quant Tools ----
 pandas-ta==0.4.67b0
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
 
+# ---- Reinforcement Learning ----
 stable-baselines3==2.3.2
 gymnasium==0.29.1
 
+# ---- Visualization ----
 matplotlib==3.9.2
 seaborn==0.13.2
+
+# ---- Utility / Infra ----
 joblib==1.4.2
 tqdm==4.67.1
 requests==2.32.3
-
 psutil==6.1.0
 schedule==1.2.1
+yfinance==0.2.50
+
+# ---- Optional: lightweight HTML template rendering (if you later add dashboards)
+jinja2==3.1.4
