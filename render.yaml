@@ -9,12 +9,11 @@ services:
     region: oregon
     autoDeploy: true
 
-    # Force Render to use Python 3.10 (not 3.13!)
     buildCommand: |
-      echo "==== Setting up system dependencies ===="
+      echo "==== 🛠️ Setting up system dependencies ===="
       apt-get update -y
       apt-get install -y gfortran build-essential pkg-config
-      echo "==== Installing Python packages ===="
+      echo "==== 🚀 Installing Python dependencies ===="
       pip install --upgrade pip setuptools wheel
       pip install --prefer-binary --no-build-isolation -r requirements.txt
       mkdir -p data models logs
@@ -28,8 +27,8 @@ services:
       - key: REFRESH_INTERVAL_SECS
         value: 3600
       - key: ALPHAV_API_KEY
-        sync: false
+        sync: false      # set real key in Render dashboard
       - key: RAPID_API_KEY
-        sync: false
+        sync: false      # optional for Investing.com
       - key: SELF_PING_URL
         value: https://xauusd-ai-trader.onrender.com/signal
