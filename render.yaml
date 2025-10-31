@@ -10,37 +10,25 @@ services:
     autoDeploy: true
 
     buildCommand: |
-      echo "==== 🛠️ Installing system dependencies ===="
+      echo "==== 🛠️ Setting up system dependencies ===="
       apt-get update -y
       apt-get install -y gfortran build-essential pkg-config
-      echo "==== 🧰 Upgrading pip and base tools ===="
+      echo "==== 🚀 Installing Python dependencies ===="
       pip install --upgrade pip setuptools wheel
-      echo "==== 📦 Installing project dependencies ===="
       pip install --prefer-binary --no-build-isolation -r requirements.txt
       mkdir -p data models logs
-      echo "==== ✅ Build completed ===="
 
     startCommand: |
-      echo "==== 🚀 Starting Gunicorn server ===="
       gunicorn main:app --workers 1 --threads 2 --timeout 300 --bind 0.0.0.0:$PORT
 
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.13
       - key: PORT
         value: 10000
       - key: REFRESH_INTERVAL_SECS
         value: 3600
       - key: ALPHAV_API_KEY
-        sync: false       # set real key in Render dashboard
+        sync: false      # set real key in Render dashboard
       - key: RAPID_API_KEY
-        sync: false       # optional for Investing.com or Alpha Adv
+        sync: false      # optional for Investing.com
       - key: SELF_PING_URL
         value: https://xauusd-ai-trader.onrender.com/signal
-      - key: PIP_DISABLE_PIP_VERSION_CHECK
-        value: "1"
-
-    disk:
-      name: app-data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1
