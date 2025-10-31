@@ -8,22 +8,24 @@ requests==2.32.3
 
 # =========================================================
 # ✅ CORE DATA / NUMERICS
+# (Pinned to stable wheels for Python 3.10 — avoids Cython build errors)
 # =========================================================
 pandas==2.2.2
 numpy==1.26.4
-scipy==1.14.1
+scipy==1.13.1
 
 # =========================================================
 # ✅ MACHINE LEARNING / OPTIMIZATION
 # =========================================================
-scikit-learn==1.5.2
-xgboost==2.1.2
-lightgbm==4.4.0
-optuna==4.0.0
+scikit-learn==1.4.2
+xgboost==2.1.1
+lightgbm==4.3.0
+optuna==3.6.1
 hyperopt==0.2.7
 
 # =========================================================
 # ✅ TECHNICAL ANALYSIS / BACKTESTING
+# (Stable versions with no C extensions rebuild issues)
 # =========================================================
 pandas-ta==0.4.67b0
 ta==0.11.0
@@ -40,13 +42,20 @@ gymnasium==0.29.1
 # ✅ UTILITIES / LOGGING / SCHEDULING
 # =========================================================
 joblib==1.4.2
-tqdm==4.67.1
-psutil==6.1.0
+tqdm==4.66.5
+psutil==5.9.8
 schedule==1.2.1
 loguru==0.7.2
 
 # =========================================================
 # ✅ MARKET DATA APIs
 # =========================================================
-alpha_vantage==2.3.1          # stable version for Python 3.10
-investpy==1.0.8               # fallback to original package (reborn not needed)
+alpha_vantage==2.3.1
+investpy==1.0.8
+
+# =========================================================
+# ✅ MISC DEPENDENCIES (to prevent Cython build crashes)
+# =========================================================
+cython==3.0.10
+setuptools==70.0.0
+wheel==0.43.0
