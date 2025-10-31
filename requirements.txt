@@ -35,4 +35,4 @@ loguru==0.7.2
 
 # --- APIs ---
 alpha_vantage==3.0.0
-investpy-reborn==0.1.11
+investpy==1.0.8
