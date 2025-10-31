@@ -1,21 +1,30 @@
+# =========================================================
+# ✅ RENDER DEPLOY CONFIGURATION (render.yaml)
+# =========================================================
 services:
   - type: web
     name: xauusd-ai-trader
     env: python
+    plan: free
+    region: oregon
+    autoDeploy: true
+
     buildCommand: |
       pip install --upgrade pip
       pip install --prefer-binary --no-build-isolation -r requirements.txt
       mkdir -p data models logs
-    startCommand: "python main.py"
-    plan: free
-    autoDeploy: true
+
+    startCommand: |
+      gunicorn main:app --workers 1 --threads 2 --timeout 300 --bind 0.0.0.0:$PORT
 
     envVars:
-      - key: REFRESH_INTERVAL_SECS
-        value: 3600                  # Refresh every hour
       - key: PORT
-        value: 10000                 # Required for Render
+        value: 10000                           # Required for Render web apps
+      - key: REFRESH_INTERVAL_SECS
+        value: 3600                            # Refresh every hour
       - key: ALPHAV_API_KEY
-        value: demo                  # Replace with your real Alpha Vantage API key
+        sync: false                            # Add securely via Render Dashboard
+      - key: RAPID_API_KEY
+        sync: false                            # Add securely via Render Dashboard
       - key: SELF_PING_URL
-        value: https://xauusd-ai-trader.onrender.com/signal  # Keeps the service alive
+        value: https://xauusd-ai-trader.onrender.com/signal  # Keeps service alive
