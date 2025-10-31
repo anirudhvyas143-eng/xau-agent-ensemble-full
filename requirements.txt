@@ -21,15 +21,14 @@ scipy==1.13.1
 scikit-learn==1.5.2
 xgboost==2.1.2
 lightgbm==4.4.0
-optuna==4.0.0
+optuna==3.6.1      # ✅ 4.0.0 needs Python 3.11+, so use 3.6.1
 hyperopt==0.2.7
 
 # =========================================================
 # ✅ TECHNICAL ANALYSIS / BACKTESTING
 # =========================================================
-# Works perfectly with Python 3.10 on Render (no GitHub auth issues)
-pandas-ta==0.3.14b0
-ta==0.11.0
+# pandas-ta==0.3.14b0 ❌ incompatible with Python 3.10
+ta==0.10.2          # ✅ stable replacement for pandas-ta
 quantstats==0.0.62
 backtrader==1.9.78.123
 
@@ -53,3 +52,4 @@ loguru==0.7.2
 # =========================================================
 alpha_vantage==2.3.1
 investpy==1.0.8
+yfinance==0.2.43
