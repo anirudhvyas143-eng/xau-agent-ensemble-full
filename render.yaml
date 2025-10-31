@@ -10,8 +10,12 @@ services:
     autoDeploy: true
 
     buildCommand: |
+      # Clean and prepare environment
       pip install --upgrade pip
+      pip cache purge || true
+      # Install dependencies
       pip install --prefer-binary --no-build-isolation -r requirements.txt
+      # Prepare directories for logs & models
       mkdir -p data models logs
 
     startCommand: |
