@@ -36,3 +36,4 @@ loguru==0.7.2
 
 # --- Alpha Vantage API ---
 alpha_vantage==3.0.0
+investpy-reborn==0.1.11
