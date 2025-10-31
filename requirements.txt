@@ -1,3 +1,5 @@
+--extra-index-url https://pypi.anaconda.org/conda-forge/simple
+
 # =========================================================
 # ✅ CORE WEB / API
 # =========================================================
@@ -22,15 +24,14 @@ lightgbm==4.4.0
 optuna==4.0.0
 hyperopt==0.2.7
 
-
 # =========================================================
 # ✅ TECHNICAL ANALYSIS / BACKTESTING
 # =========================================================
-https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
+# Works perfectly with Python 3.10 on Render (no GitHub auth issues)
+pandas-ta==0.3.14b0
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
-
 
 # =========================================================
 # ✅ REINFORCEMENT LEARNING (OPTIONAL)
