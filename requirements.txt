@@ -25,7 +25,7 @@ hyperopt==0.2.7
 # =========================================================
 # ✅ TECHNICAL ANALYSIS / BACKTESTING
 # =========================================================
-pandas-ta==0.4.67b0
+pandas-ta==0.3.14b0          # ✅ Compatible with Python 3.10
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
