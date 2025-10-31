@@ -1,160 +1,172 @@
-# 🦾 XAUUSD AI Trader Agent — Adaptive ML + RL + Agentic Automation
+🟡 XAUUSD AI Trader (Agentic Ensemble Model)
 
-A next-gen, full-stack AI-powered trading engine for Gold (XAUUSD).  
-This system merges Machine Learning, Reinforcement Learning, Quantitative Analysis, and Agentic AI automation to deliver real-time BUY/SELL signals on both hourly and daily timeframes — retraining itself automatically to stay profitable in any market condition.
+This project is an AI-driven trading system for XAUUSD (gold) that combines technical indicators, sentiment analysis, and ensemble machine-learning models to generate buy/sell signals. It uses Flask for the backend, Pandas-TA for technical analysis, and machine-learning libraries like LightGBM and Scikit-Learn.
 
----
+⸻
 
-## ⚙️ Core Capabilities
-✅ Dual-Timeframe Signal Engine — Hourly (1H) and Daily (1D)  
-✅ Automated Data Pipeline — Auto-fetches & cleans gold price data via Yahoo Finance  
-✅ Feature Engineering Suite — EMA, ATR, RSI, Volatility, Momentum, Regime Detection  
-✅ Hybrid ML + RL Models — XGBoost, LightGBM, CatBoost + Stable-Baselines (PPO/DQN)  
-✅ Self-Learning AI Automation Layer — Detects drift, retrains, redeploys automatically  
-✅ Optuna + HyperOpt Optimization — Peak signal precision tuning  
-✅ Backtesting + QuantStats Reports — Transparent equity curves & strategy metrics  
-✅ REST API + Dashboard Ready — Endpoints for trading bots, dashboards, or alerts  
-✅ Render Free-Plan Compatible — Auto-refresh with hourly & daily inference  
+🚀 Deployment Overview
 
----
+You can deploy this project instantly on Render.com.
+After deployment, your app will be live at:
+https://xauusd-ai-trader.onrender.com/signal
 
-## 🧩 New Multi-Strategy Engine (Added Oct 2025)
-Integrated Fundamental + Technical Strategy Fusion:
-- Trend-Following — Trades with macro direction using multi-EMA crossovers  
-- News Trading — Adapts to volatility surges post major events (CPI, Fed, geopolitical)  
-- Range Trading — Detects support/resistance ranges & mean-reversion setups  
-- Position Trading — Long-term, fundamentally driven signal bias  
-- Auto-Ensemble Blend — Dynamic weighting between fundamental + technical signals  
+⸻
 
-Controlled via `strategy_manager.py`, allowing plug-and-play custom strategies and weighting.
+⚙️ Tech Stack
+	•	Backend: Flask + Gunicorn
+	•	AI Models: LightGBM, Scikit-Learn, Pandas-TA
+	•	Python Version: 3.10.13
+	•	Hosting: Render (Free plan compatible)
+	•	Data Sources: Alpha Vantage and Investing.com
 
----
+⸻
 
-## 📂 Project Structure
-/data — Historical datasets (auto-fetched from Yahoo Finance)  
-/models — Auto-saved ML & RL model checkpoints  
-/logs — Runtime, drift, and retraining logs  
-/load_data.py — Fetch + preprocess multi-timeframe XAUUSD data  
-/features_engineering.py — Technical feature builder (EMA, RSI, ATR, Momentum)  
-/strategy_manager.py — Core fusion: trend-following, range, news, position trading  
-/ensemble_train_retrain.py — Continuous retraining & ensemble logic  
-/ai_automation.py — Drift detection + auto-retrain pipeline  
-/backtest_engine.py — Strategy simulation + QuantStats reports  
-/main.py — Flask API (inference & signal serving)  
-/requirements.txt — Dependencies  
-/render.yaml — Render deploy configuration  
-/README.md — Documentation (this file)
+📁 File Structure
 
----
+.
+├── main.py               → Flask app entry point
+├── requirements.txt      → Python dependencies
+├── render.yaml           → Render deployment config
+├── runtime.txt           → Python version lock (3.10.13)
+├── models/               → Trained models
+├── data/                 → Cached data
+├── logs/                 → Log files
+└── README.md             → Project documentation
 
-## 🚀 Quick Deploy on Render
-1️⃣ Push this repo to GitHub  
-git init  
-git add .  
-git commit -m "Initial XAUUSD AI Trader commit"  
-git branch -M main  
-git remote add origin https://github.com/yourname/xauusd-ai-trader.git  
-git push -u origin main  
+⸻
 
-2️⃣ Go to Render.com → “New Web Service”  
-- Connect your GitHub repo  
-- Choose Free Plan  
+🌍 Environment Variables (set in Render Dashboard)
+	•	ALPHAV_API_KEY → Your Alpha Vantage API key
+	•	RAPID_API_KEY → Optional, for Investing.com API
+	•	SELF_PING_URL → Optional, to keep app alive
+	•	REFRESH_INTERVAL_SECS → Default: 3600
+	•	PORT → Default: 10000
 
-Build Command:  
-pip install --upgrade pip  
-pip install --prefer-binary --no-build-isolation -r requirements.txt  
+⸻
 
-Start Command:  
-python ai_automation.py  
+🧠 Local Setup (Manual Testing)
+	1.	Clone repo:
+git clone https://github.com/anirudhvyas143-eng/xau-agent-ensemble-full.git
+	2.	Navigate to project folder:
+cd xau-agent-ensemble-full
+	3.	Create virtual environment:
+python -m venv venv
+	4.	Activate it:
+	•	On macOS/Linux: source venv/bin/activate
+	•	On Windows: venv\Scripts\activate
+	5.	Install dependencies:
+pip install -r requirements.txt
+	6.	Run app locally:
+python main.py
+	7.	Visit http://localhost:10000/signal in browser.
 
----
+⸻
 
-## 🧠 System Flow Overview
-load_data.py → Fetches gold data (daily/weekly/monthly) via Yahoo Finance  
-features_engineering.py → Computes EMA, RSI, ATR, Momentum, Volatility, etc.  
-strategy_manager.py → Blends multiple strategies (trend/news/range/position)  
-ensemble_train_retrain.py → Periodic retraining & model selection  
-ai_automation.py → Monitors drift, triggers retraining, logs updates  
-backtest_engine.py → Generates performance reports  
-main.py → Flask API endpoints for signals & history  
+🧰 Render Build Process (render.yaml logic)
 
----
+Render automatically executes these steps during deployment:
+	1.	System setup
+	•	apt-get update -y
+	•	apt-get install -y gfortran build-essential pkg-config
+	2.	Python environment setup
+	•	pip install –upgrade pip setuptools wheel
+	•	pip install –prefer-binary –no-build-isolation -r requirements.txt
+	3.	Folder creation
+	•	mkdir -p data models logs
+	4.	Start command
+	•	gunicorn main:app –workers 1 –threads 2 –timeout 300 –bind 0.0.0.0:$PORT
 
-## 🌐 API Endpoints
-**Health Check:**  
-GET /  
-→ { "status": "ok", "time": "2025-10-29T06:00Z", "message": "XAUUSD AI Trader active" }
+⸻
 
-**Run Hourly Signal:**  
-GET /run  
-→ { "signal": "BUY", "confidence": 0.93, "entry": 2382.4, "tp": 2401.2, "sl": 2368.9 }
+🔄 Self-Ping (Keep Alive Feature)
 
-**Run Daily Signal:**  
-GET /run_daily  
-→ { "signal": "SELL", "confidence": 0.88 }
+To prevent Render free plan from sleeping, add this snippet before app.run() in main.py:
 
-**Signal History:**  
-GET /history  
-→ { "history": [{ "tf": "1H", "signal": "BUY", "price": 2378.3 }, ...] }
+import threading, requests, time, os
 
----
+def self_ping():
+url = os.getenv(“SELF_PING_URL”)
+if not url:
+return
+while True:
+try:
+requests.get(url, timeout=10)
+print(f”Pinged self URL: {url}”)
+except Exception as e:
+print(f”Ping error: {e}”)
+time.sleep(900)
 
-## 📊 Backtesting & Performance
-Run backtesting:  
-python backtest_engine.py  
+threading.Thread(target=self_ping, daemon=True).start()
 
-Outputs:  
-- strategy_performance.png → AI vs Market equity curve  
-- backtest_results.csv → full trade log  
-- Metrics: Total Return %, Sharpe, Sortino, Max Drawdown  
+Then, set SELF_PING_URL=https://xauusd-ai-trader.onrender.com/signal in Render environment variables.
 
----
+⸻
 
-## 🧰 AI Tech Stack
-| Layer | Tools |
-|-------|-------|
-| Data Source | Yahoo Finance (yfinance) |
-| Feature Engine | pandas-ta, ta, NumPy, SciPy |
-| Machine Learning | XGBoost, LightGBM, CatBoost |
-| Reinforcement Learning | Stable-Baselines (PPO / DQN) |
-| Optimization | Optuna, HyperOpt |
-| Backtesting & Reports | Backtrader, QuantStats, Matplotlib |
-| Automation | ai_automation.py + Render auto-deploy |
-| API | Flask (REST) |
+📦 requirements.txt
 
----
+Flask==3.0.3
+Flask-Cors==4.0.0
+gunicorn==23.0.0
+requests==2.32.3
+pandas==2.2.3
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.5.2
+xgboost==2.1.2
+lightgbm==4.4.0
+optuna==4.0.0
+hyperopt==0.2.7
+pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git@main
 
-## 🕒 Keep Alive (Optional)
-Add a free UptimeRobot ping every 15 minutes:  
-https://xauusd-ai-trader.onrender.com/
+⸻
 
----
+📜 runtime.txt
 
-## 🧾 API Summary
-| Endpoint | Method | Description |
-|-----------|---------|-------------|
-| / | GET | Health check |
-| /run | GET | Generate hourly signal |
-| /run_daily | GET | Generate daily signal |
-| /history | GET | Fetch recent signal logs |
+python-3.10.13
 
----
+⸻
 
-## 🧠 Future Expansion
-- Multi-asset support (XAGUSD, EURUSD, BTCUSD)  
-- News sentiment ingestion (Twitter, Bloomberg, Fed statements)  
-- Agentic portfolio management  
-- MetaTrader 5 / cTrader webhook integration  
+🪄 render.yaml
 
----
+services:
+	•	type: web
+name: xauusd-ai-trader
+env: python
+plan: free
+region: oregon
+autoDeploy: true
+buildCommand: |
+echo “==== 🛠️ Setting up system dependencies ====”
+apt-get update -y
+apt-get install -y gfortran build-essential pkg-config
+echo “==== 🚀 Installing Python dependencies ====”
+pip install –upgrade pip setuptools wheel
+pip install –prefer-binary –no-build-isolation -r requirements.txt
+mkdir -p data models logs
+startCommand: |
+gunicorn main:app –workers 1 –threads 2 –timeout 300 –bind 0.0.0.0:$PORT
+envVars:
+	•	key: PORT
+value: 10000
+	•	key: REFRESH_INTERVAL_SECS
+value: 3600
+	•	key: ALPHAV_API_KEY
+sync: false
+	•	key: RAPID_API_KEY
+sync: false
+	•	key: SELF_PING_URL
+value: https://xauusd-ai-trader.onrender.com/signal
 
-## 📜 License
-MIT License © 2025 – Anirudh Vyas  
+⸻
 
----
+🧾 License
 
-## 👨‍💻 Author
-Developed by: **Anirudh Vyas**  
-Purpose: Build a self-learning, adaptive AI quant ecosystem for precision XAUUSD trading — blending ML, RL, and Agentic AI automation.
+MIT License © 2025 — Created by Anirudh Vyas
 
+⸻
 
+💡 Notes
+	•	Always install pandas-ta from GitHub main branch (@main).
+	•	Avoid .whl and .zip URLs — Render doesn’t support them.
+	•	Ensure runtime.txt uses Python 3.10.13 for smooth builds.
+	•	If build fails due to cache, click “Clear Build Cache” and redeploy from Render dashboard.
