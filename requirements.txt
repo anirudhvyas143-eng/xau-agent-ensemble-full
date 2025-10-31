@@ -1,38 +1,52 @@
-# --- Web / API ---
+# =========================================================
+# ✅ CORE WEB / API
+# =========================================================
 Flask==3.0.3
 Flask-Cors==4.0.0
 gunicorn==23.0.0
 requests==2.32.3
 
-# --- Core Data / Math ---
-pandas>=2.3.2,<3.0
-numpy>=1.26.0,<3.0
+# =========================================================
+# ✅ CORE DATA / NUMERICS
+# =========================================================
+pandas==2.2.2
+numpy==1.26.4
 scipy==1.14.1
 
-# --- Machine Learning / Optimization ---
+# =========================================================
+# ✅ MACHINE LEARNING / OPTIMIZATION
+# =========================================================
 scikit-learn==1.5.2
 xgboost==2.1.2
 lightgbm==4.4.0
 optuna==4.0.0
 hyperopt==0.2.7
 
-# --- Technical Indicators / Analytics ---
+# =========================================================
+# ✅ TECHNICAL ANALYSIS / BACKTESTING
+# =========================================================
 pandas-ta==0.4.67b0
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
 
-# --- Reinforcement Learning (optional) ---
+# =========================================================
+# ✅ REINFORCEMENT LEARNING (OPTIONAL)
+# =========================================================
 stable-baselines3==2.3.2
 gymnasium==0.29.1
 
-# --- Utilities ---
+# =========================================================
+# ✅ UTILITIES / LOGGING / SCHEDULING
+# =========================================================
 joblib==1.4.2
 tqdm==4.67.1
 psutil==6.1.0
 schedule==1.2.1
 loguru==0.7.2
 
-# --- APIs ---
-alpha_vantage==3.0.0
-investpy==1.0.8
+# =========================================================
+# ✅ MARKET DATA APIs
+# =========================================================
+alpha_vantage==2.3.1          # stable version for Python 3.10
+investpy==1.0.8               # fallback to original package (reborn not needed)
