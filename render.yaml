@@ -10,18 +10,24 @@ services:
     autoDeploy: true
 
     buildCommand: |
-      # Clean and prepare environment
-      pip install --upgrade pip
+      echo "🔧 Setting up Python environment..."
+      pip install --upgrade pip setuptools wheel
       pip cache purge || true
-      # Install dependencies
+
+      echo "📦 Installing dependencies..."
       pip install --prefer-binary --no-build-isolation -r requirements.txt
-      # Prepare directories for logs & models
+
+      echo "🗂️ Preparing directories..."
       mkdir -p data models logs
+
+      echo "✅ Build complete!"
 
     startCommand: |
       gunicorn main:app --workers 1 --threads 2 --timeout 300 --bind 0.0.0.0:$PORT
 
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13                         # 👈 Force Python 3.10.13 (fix pandas compile error)
       - key: PORT
         value: 10000                           # Required for Render web apps
       - key: REFRESH_INTERVAL_SECS
