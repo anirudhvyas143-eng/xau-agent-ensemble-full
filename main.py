@@ -125,14 +125,20 @@ def compute_indicators(df):
     except Exception as e:
         print("⚠️ Indicator computation error:", e)
         return pd.DataFrame()
+
+
 def fetch_yf(symbol, period, interval):
-    """Download data with yfinance safely."""
-    import yfinance as yf
+    """Download data with yfinance safely, with adj close fallback."""
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False, threads=False)
-        if df.empty or "Close" not in df.columns:
-            print(f"⚠️ Empty or invalid data ({symbol}, {period}, {interval})")
+        if df.empty:
+            print(f"⚠️ Empty data ({symbol}, {period}, {interval})")
             return pd.DataFrame()
+
+        # Fallback if Close missing
+        if "Close" not in df.columns and "Adj Close" in df.columns:
+            df["Close"] = df["Adj Close"]
+
         df = df.dropna().reset_index()
         return normalize_ohlcv_df(df)
     except Exception as e:
@@ -143,28 +149,25 @@ def fetch_yf(symbol, period, interval):
 def fetch_and_build_datasets():
     """Fetch and build hourly + daily datasets with fallbacks."""
     print("📥 Fetching data from Yahoo Finance...")
-    df_day = pd.DataFrame()
-    df_hour = pd.DataFrame()
+    df_day, df_hour = pd.DataFrame(), pd.DataFrame()
 
-    # --- Daily data fetch (up to 10 years) ---
-    for p in ["10y", "5y", "2y", "1y"]:
+    # --- Daily data fetch ---
+    for p in ["25y", "15y", "10y", "5y", "2y"]:
         df_day = fetch_yf(YF_SYMBOL, period=p, interval="1d")
         if not df_day.empty:
             print(f"✅ Fetched daily ({p}) rows={len(df_day)}")
             break
 
-    # --- Hourly data fetch (up to 2 years max) ---
+    # --- Hourly data fetch ---
     for p in ["2y", "1y", "6mo", "3mo"]:
         df_hour = fetch_yf(YF_SYMBOL, period=p, interval="1h")
         if not df_hour.empty:
             print(f"✅ Fetched hourly ({p}) rows={len(df_hour)}")
             break
 
-    # --- Handle failures gracefully ---
     if df_day.empty and df_hour.empty:
         raise RuntimeError("❌ Failed to fetch any valid data from Yahoo Finance.")
 
-    # --- Save datasets locally ---
     os.makedirs("data", exist_ok=True)
     if not df_day.empty:
         df_day.to_csv("data/XAU_USD_Historical_Data_daily.csv", index=False)
@@ -175,51 +178,6 @@ def fetch_and_build_datasets():
         print("💾 Saved hourly data -> data/XAU_USD_Historical_Data_hourly.csv")
 
     return df_day, df_hour
-
-
-
-    # Daily pipeline
-    if not df_day.empty:
-        try:
-            df_day_proc = compute_indicators(df_day)
-            if not df_day_proc.empty:
-                df_day_proc.to_csv(DAILY_FILE, index=False)
-                print("💾 Saved daily features:", DAILY_FILE)
-                # weekly + monthly
-                df_day_proc.index = pd.to_datetime(df_day_proc["Date"])
-                df_week = df_day_proc.resample("W").agg({
-                    "Open": "first", "High": "max", "Low": "min", "Close": "last"
-                }).dropna()
-                if not df_week.empty:
-                    compute_indicators(df_week.reset_index()).to_csv(WEEKLY_FILE, index=False)
-                    print("💾 Saved weekly features:", WEEKLY_FILE)
-                df_month = df_day_proc.resample("M").agg({
-                    "Open": "first", "High": "max", "Low": "min", "Close": "last"
-                }).dropna()
-                if not df_month.empty:
-                    compute_indicators(df_month.reset_index()).to_csv(MONTHLY_FILE, index=False)
-                    print("💾 Saved monthly features:", MONTHLY_FILE)
-        except Exception as e:
-            print("⚠️ Error processing daily data:", e)
-
-    # Hourly pipeline
-    if not df_hour.empty:
-        try:
-            df_hour_proc = compute_indicators(df_hour)
-            if df_hour_proc.empty:
-                print("⚠️ Hourly indicator computation returned empty dataset.")
-                return
-            if HOURLY_FILE.exists():
-                existing = pd.read_csv(HOURLY_FILE, parse_dates=["Date"])
-                combined = pd.concat([existing, df_hour_proc]).drop_duplicates(subset=["Date"], keep="last")
-                combined = combined.sort_values("Date").reset_index(drop=True)
-                combined.to_csv(HOURLY_FILE, index=False)
-                print(f"📈 Appended hourly data → {len(combined)} rows total.")
-            else:
-                df_hour_proc.to_csv(HOURLY_FILE, index=False)
-                print("💾 Saved hourly features:", HOURLY_FILE)
-        except Exception as e:
-            print("⚠️ Error processing hourly data:", e)
 
 
 # ---------------- MODEL TRAINING ----------------
@@ -266,8 +224,6 @@ def build_train_and_signal():
                 pred = int(model_h.predict(scaler_h.transform(last))[0])
                 results["hour_signal"] = "BUY" if pred == 1 else "SELL"
                 results["hour_confidence"] = round(prob * 100, 2)
-            else:
-                results["hour_signal"], results["hour_confidence"] = "N/A", 0.0
         except Exception as e:
             print("⚠️ Hourly model error:", e)
             results["hour_signal"], results["hour_confidence"] = "N/A", 0.0
@@ -288,13 +244,10 @@ def build_train_and_signal():
                 pred = int(model_d.predict(scaler_d.transform(last))[0])
                 results["day_signal"] = "BUY" if pred == 1 else "SELL"
                 results["day_confidence"] = round(prob * 100, 2)
-            else:
-                results["day_signal"], results["day_confidence"] = "N/A", 0.0
         except Exception as e:
             print("⚠️ Daily model error:", e)
             results["day_signal"], results["day_confidence"] = "N/A", 0.0
 
-    # save
     out = {
         "timestamp": str(datetime.now(timezone.utc)),
         **results
