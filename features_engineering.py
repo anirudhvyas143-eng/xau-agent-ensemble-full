@@ -33,8 +33,8 @@ def detect_columns(df):
             if key in normalized:
                 break
 
+        # Fallback to close if high/low not available
         if key not in normalized:
-            # If missing high/low, fallback to close to prevent crashes
             if key in ["high", "low"]:
                 normalized[key] = "close"
             else:
@@ -52,11 +52,11 @@ def detect_columns(df):
 # 🧮 Technical Feature Computations
 # =====================================================
 def compute_technical_features(df):
-    """Compute robust technical indicators."""
+    """Compute robust technical indicators for model training and live predictions."""
     df = df.copy()
     df = detect_columns(df)
 
-    # === Exponential Moving Averages ===
+    # === EMAs ===
     df["ema_20"] = df["close"].ewm(span=20, adjust=False).mean()
     df["ema_50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["ema_100"] = df["close"].ewm(span=100, adjust=False).mean()
@@ -67,7 +67,7 @@ def compute_technical_features(df):
     loss = np.where(delta < 0, -delta, 0)
     avg_gain = pd.Series(gain).rolling(14).mean()
     avg_loss = pd.Series(loss).rolling(14).mean()
-    rs = avg_gain / avg_loss
+    rs = avg_gain / (avg_loss + 1e-9)
     df["rsi_14"] = 100 - (100 / (1 + rs))
 
     # === MACD + Signal Line ===
@@ -94,7 +94,7 @@ def compute_technical_features(df):
 # 🧠 Multi-Timeframe Feature Fusion
 # =====================================================
 def merge_multi_timeframes(datasets):
-    """Merge daily, weekly, and monthly features into one ensemble dataset."""
+    """Merge daily, weekly, and monthly (if any) features into one ensemble dataset."""
     df_daily = datasets.get("daily")
     df_weekly = datasets.get("weekly")
     df_monthly = datasets.get("monthly")
@@ -123,14 +123,13 @@ def merge_multi_timeframes(datasets):
 # 🏗️ Main Feature Builder
 # =====================================================
 def build_features():
-    """Load base data, compute all features, and save ensemble outputs."""
+    """Load data (from CSV or live API), compute all technical indicators, and save outputs."""
     logger.info("🔄 Starting feature generation pipeline ...")
     datasets = load_and_prepare()
-
     os.makedirs("data", exist_ok=True)
 
     for tf, df in datasets.items():
-        logger.info(f"🧮 Computing technical features for {tf} ({len(df)} rows)")
+        logger.info(f"🧮 Computing technical features for {tf} timeframe ({len(df)} rows)")
         try:
             df = compute_technical_features(df)
             out_path = OUTPUT_PATHS.get(tf, f"data/features_full_{tf}.csv")
