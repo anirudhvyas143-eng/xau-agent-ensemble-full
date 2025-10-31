@@ -1,5 +1,5 @@
 # =========================================================
-# ✅ RENDER DEPLOY CONFIGURATION
+# ✅ RENDER DEPLOY CONFIGURATION (render.yaml)
 # =========================================================
 services:
   - type: web
@@ -9,9 +9,14 @@ services:
     region: oregon
     autoDeploy: true
 
+    # Force Render to use Python 3.10 (not 3.13!)
     buildCommand: |
-      pip install --upgrade pip
-      pip install --no-build-isolation --prefer-binary -r requirements.txt
+      echo "==== Setting up system dependencies ===="
+      apt-get update -y
+      apt-get install -y gfortran build-essential pkg-config
+      echo "==== Installing Python packages ===="
+      pip install --upgrade pip setuptools wheel
+      pip install --prefer-binary --no-build-isolation -r requirements.txt
       mkdir -p data models logs
 
     startCommand: |
