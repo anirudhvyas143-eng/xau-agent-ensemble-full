@@ -17,9 +17,17 @@ DRIFT_THRESHOLD = 0.05  # 5% accuracy drop triggers retrain or rollback
 
 # === MAIN FUNCTION ===
 def detect_model_drift(new_data: pd.DataFrame):
-    """Detect and handle model drift — auto-retrain or rollback for accuracy protection."""
+    """
+    Detect and handle model drift — auto-retrain or rollback for accuracy protection.
+    Uses adaptive features from new live data (e.g., Alpha Vantage feed).
+    """
+
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
+
+    if new_data is None or len(new_data) < 50:
+        logger.warning("⚠️ Insufficient or empty data for drift detection.")
+        return None
 
     if not os.path.exists(MODEL_PATH):
         logger.warning("❌ Model not found for drift check.")
@@ -31,20 +39,40 @@ def detect_model_drift(new_data: pd.DataFrame):
         logger.error(f"⚠️ Error loading model: {e}")
         return None
 
-    # === Build live features ===
+    # === Build technical features ===
     df = new_data.copy()
+    df = df.sort_values(by="date", ascending=True).reset_index(drop=True)
+
+    # Ensure column names are standardized
+    if "Close" in df.columns:
+        df.rename(columns={"Close": "close"}, inplace=True)
+
+    if "close" not in df.columns:
+        logger.error("❌ 'close' column not found in data for drift detection.")
+        return None
+
     df["ema21"] = df["close"].ewm(span=21).mean()
     df["ema50"] = df["close"].ewm(span=50).mean()
     df["atr14"] = df["close"].pct_change().rolling(14).std()
     df.dropna(inplace=True)
+
+    # Create binary target for direction
     df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
 
     X = df[["ema21", "ema50", "atr14"]]
     y = df["target"]
 
-    preds = model.predict(X)
-    acc = accuracy_score(y, preds)
-    logger.info(f"🧩 Current model accuracy: {acc:.4f}")
+    if len(X) < 20:
+        logger.warning("⚠️ Not enough rows for valid drift accuracy test.")
+        return None
+
+    try:
+        preds = model.predict(X)
+        acc = accuracy_score(y, preds)
+        logger.info(f"🧩 Current model accuracy: {acc:.4f}")
+    except Exception as e:
+        logger.error(f"⚠️ Model prediction error: {e}")
+        return None
 
     # === Load previous accuracy benchmark ===
     prev_acc = None
@@ -55,7 +83,7 @@ def detect_model_drift(new_data: pd.DataFrame):
         except Exception:
             logger.warning("⚠️ Could not read previous drift log.")
 
-    # === Save accuracy log ===
+    # === Save new accuracy log ===
     new_entry = pd.DataFrame({
         "timestamp": [datetime.utcnow().isoformat()],
         "accuracy": [acc]
@@ -66,7 +94,7 @@ def detect_model_drift(new_data: pd.DataFrame):
     drift_detected = False
     if prev_acc and (prev_acc - acc) > DRIFT_THRESHOLD:
         drift_detected = True
-        logger.warning(f"⚠️ Model drift detected! Drop: {(prev_acc - acc):.2%}")
+        logger.warning(f"⚠️ Model drift detected! Accuracy drop: {(prev_acc - acc):.2%}")
 
         try:
             # 🔁 Auto retrain ensemble model
@@ -91,10 +119,14 @@ def detect_model_drift(new_data: pd.DataFrame):
 
     return acc
 
-# === Test Run ===
+
+# === Optional Test Run ===
 if __name__ == "__main__":
     if os.path.exists(DATA_PATH):
-        df = pd.read_csv(DATA_PATH)
-        detect_model_drift(df)
+        try:
+            df = pd.read_csv(DATA_PATH)
+            detect_model_drift(df)
+        except Exception as e:
+            logger.error(f"⚠️ Test run failed: {e}")
     else:
         logger.warning("⚠️ No data available for drift test.")
