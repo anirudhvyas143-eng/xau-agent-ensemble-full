@@ -26,7 +26,7 @@ hyperopt==0.2.7
 # ✅ TECHNICAL ANALYSIS / BACKTESTING
 # =========================================================
 # pandas-ta not available on PyPI for Python 3.10 — fetch from GitHub
-git+https://github.com/twopirllc/pandas-ta.git@main
+https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
