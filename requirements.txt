@@ -11,7 +11,7 @@ requests==2.32.3
 # =========================================================
 pandas==2.2.3
 numpy==1.26.4
-scipy==1.13.1      # ✅ prebuilt wheel for Python 3.10 (no compile errors)
+scipy==1.13.1
 
 # =========================================================
 # ✅ MACHINE LEARNING / OPTIMIZATION
@@ -25,7 +25,7 @@ hyperopt==0.2.7
 # =========================================================
 # ✅ TECHNICAL ANALYSIS / BACKTESTING
 # =========================================================
-pandas-ta==0.4.67b0      # ✅ latest build compatible with pandas 2.2
+pandas-ta==0.3.14b0     # ✅ Last stable version for Python 3.10 + pandas 2.2
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
