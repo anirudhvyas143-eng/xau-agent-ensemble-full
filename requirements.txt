@@ -10,7 +10,7 @@ requests==2.32.3
 # ✅ CORE DATA / NUMERICS
 # (Pinned to stable wheels for Python 3.10 — avoids Cython build errors)
 # =========================================================
-pandas==2.2.2
+pandas==2.2.3
 numpy==1.26.4
 scipy==1.13.1
 
