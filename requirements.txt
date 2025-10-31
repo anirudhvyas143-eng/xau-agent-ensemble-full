@@ -33,7 +33,3 @@ tqdm==4.67.1
 psutil==6.1.0
 schedule==1.2.1
 loguru==0.7.2
-
-# --- Alpha Vantage API ---
-alpha_vantage==3.0.0
-investpy-reborn==0.1.11
