@@ -22,7 +22,7 @@ ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
 
-# --- Reinforcement Learning (optional / safe) ---
+# --- Reinforcement Learning (optional) ---
 stable-baselines3==2.3.2
 gymnasium==0.29.1
 
@@ -32,4 +32,7 @@ tqdm==4.67.1
 psutil==6.1.0
 schedule==1.2.1
 loguru==0.7.2
-apscheduler==3.10.4
+
+# --- APIs ---
+alpha_vantage==3.0.0
+investpy-reborn==0.1.11
