@@ -26,7 +26,7 @@ hyperopt==0.2.7
 # =========================================================
 # ✅ TECHNICAL ANALYSIS / BACKTESTING
 # =========================================================
-https://github.com/twopirllc/pandas-ta/releases/download/v0.3.14b/pandas_ta-0.3.14b0-py3-none-any.whl
+https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
 ta==0.11.0
 quantstats==0.0.62
 backtrader==1.9.78.123
