@@ -1,5 +1,5 @@
 # =========================================================
-# ✅ RENDER DEPLOY CONFIGURATION (render.yaml)
+# ✅ RENDER DEPLOY CONFIGURATION
 # =========================================================
 services:
   - type: web
@@ -10,31 +10,21 @@ services:
     autoDeploy: true
 
     buildCommand: |
-      echo "🔧 Setting up Python environment..."
-      pip install --upgrade pip setuptools wheel
-      pip cache purge || true
-
-      echo "📦 Installing dependencies..."
-      pip install --prefer-binary --no-build-isolation -r requirements.txt
-
-      echo "🗂️ Preparing directories..."
+      pip install --upgrade pip
+      pip install --no-build-isolation --prefer-binary -r requirements.txt
       mkdir -p data models logs
-
-      echo "✅ Build complete!"
 
     startCommand: |
       gunicorn main:app --workers 1 --threads 2 --timeout 300 --bind 0.0.0.0:$PORT
 
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.13                         # 👈 Force Python 3.10.13 (fix pandas compile error)
       - key: PORT
-        value: 10000                           # Required for Render web apps
+        value: 10000
       - key: REFRESH_INTERVAL_SECS
-        value: 3600                            # Refresh every hour
+        value: 3600
       - key: ALPHAV_API_KEY
-        sync: false                            # Add securely via Render Dashboard
+        sync: false
       - key: RAPID_API_KEY
-        sync: false                            # Add securely via Render Dashboard
+        sync: false
       - key: SELF_PING_URL
-        value: https://xauusd-ai-trader.onrender.com/signal  # Keeps service alive
+        value: https://xauusd-ai-trader.onrender.com/signal
