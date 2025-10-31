@@ -1,188 +1,118 @@
-# main.py — XAUUSD Agent (Auto-growing hourly dataset + 25y daily fetch, indicators, training & signals)
-from flask import Flask, jsonify, request
-import pandas as pd
-import numpy as np
-import yfinance as yf
+# main.py — XAU/USD AI Agent (Investpy + AlphaVantage hybrid, daily + hourly)
+from flask import Flask, jsonify
+import pandas as pd, numpy as np, investpy, joblib, json, threading, time, os, requests
 from datetime import datetime, timezone
-import joblib, json, threading, time, os, requests
-from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+from pathlib import Path
 import warnings
-
 warnings.filterwarnings("ignore")
-app = Flask(__name__)
 
-# ---------------- CONFIG ----------------
+# ======================================================
+# === CONFIGURATION ===
+# ======================================================
+app = Flask(__name__)
 ROOT = Path(".").resolve()
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
-HOURLY_FILE = ROOT / "features_full_hourly.csv"
-DAILY_FILE = ROOT / "features_full_daily.csv"
-WEEKLY_FILE = ROOT / "features_full_weekly.csv"
-MONTHLY_FILE = ROOT / "features_full_monthly.csv"
-MODEL_HOUR = ROOT / "model_hour.pkl"
+
+DAILY_FILE = DATA_DIR / "XAU_USD_Historical_Data_daily.csv"
+HOURLY_FILE = DATA_DIR / "XAU_USD_Historical_Data_hourly.csv"
 MODEL_DAY = ROOT / "model_day.pkl"
-SCALER_HOUR = ROOT / "scaler_hour.pkl"
 SCALER_DAY = ROOT / "scaler_day.pkl"
+MODEL_HR = ROOT / "model_hr.pkl"
+SCALER_HR = ROOT / "scaler_hr.pkl"
 SIGNALS_FILE = ROOT / "signals.json"
 HISTORY_FILE = ROOT / "signals_history.json"
-BACKTEST_DIR = ROOT / "backtests"
-BACKTEST_DIR.mkdir(exist_ok=True)
 
-REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))  # 1 hour default
-YF_SYMBOL = os.getenv("YF_SYMBOL", "GC=F")  # Gold futures symbol
+REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))  # hourly retrain
 PORT = int(os.getenv("PORT", 10000))
 SELF_PING_URL = os.getenv("SELF_PING_URL", None)
+ALPHAV_API_KEY = os.getenv("ALPHAV_API_KEY", "demo")  # replace later with your key
 
 
-# ---------------- UTILITIES ----------------
-def normalize_ohlcv_df(df):
-    """Normalize yfinance DataFrame to always have Open/High/Low/Close/Volume columns."""
-    if df is None or df.empty:
-        return pd.DataFrame()
-
+# ======================================================
+# === UTILITIES ===
+# ======================================================
+def compute_indicators(df):
+    """Compute key technical indicators for training and signals."""
     df = df.copy()
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = ["_".join(map(str, c)).strip() for c in df.columns.values]
+    df["ema8"] = df["Close"].ewm(span=8, adjust=False).mean()
+    df["ema21"] = df["Close"].ewm(span=21, adjust=False).mean()
+    df["ema50"] = df["Close"].ewm(span=50, adjust=False).mean()
+    tr = pd.concat([
+        df["High"] - df["Low"],
+        (df["High"] - df["Close"].shift()).abs(),
+        (df["Low"] - df["Close"].shift()).abs(),
+    ], axis=1).max(axis=1)
+    df["atr14"] = tr.rolling(14).mean()
 
-    rename_map = {}
-    for col in df.columns:
-        cl = col.lower().strip()
-        if cl in ["open", "o"]:
-            rename_map[col] = "Open"
-        elif cl in ["high", "h"]:
-            rename_map[col] = "High"
-        elif cl in ["low", "l"]:
-            rename_map[col] = "Low"
-        elif cl in ["close", "adjclose", "adj close", "adj_close", "c", "last", "price"]:
-            rename_map[col] = "Close"
-        elif cl in ["volume", "v"]:
-            rename_map[col] = "Volume"
+    delta = df["Close"].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(14).mean()
+    avg_loss = loss.rolling(14).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    df["rsi14"] = 100 - (100 / (1 + rs))
 
-    df.rename(columns=rename_map, inplace=True)
-
-    # If Close missing but Adj Close exists, fallback
-    if "Close" not in df.columns:
-        for alt in ["Adj Close", "Adj_Close", "adjclose"]:
-            if alt in df.columns:
-                df["Close"] = df[alt]
-                break
-
-    # ensure Date column
-    if isinstance(df.index, pd.DatetimeIndex):
-        df = df.reset_index().rename(columns={df.columns[0]: "Date"})
-    elif "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-
-    # Drop rows with missing close data
-    df = df.dropna(subset=["Close"])
+    df["mom5"] = df["Close"].pct_change(5)
+    df["vol10"] = df["Close"].pct_change().rolling(10).std()
+    df = df.dropna().reset_index(drop=True)
     return df
 
 
-def compute_indicators(df):
-    """Compute indicators safely. Returns DataFrame or empty if data missing."""
+def fetch_investing_daily():
+    """Fetch 20+ years of daily XAU/USD data from Investing.com."""
+    print("📥 Fetching daily XAU/USD from Investing.com ...")
     try:
-        df = normalize_ohlcv_df(df)
-        if "Close" not in df.columns:
-            print("⚠️ No Close column found, skipping indicator computation.")
-            return pd.DataFrame()
-
-        df = df.copy()
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df = df.dropna(subset=["Date"])
-        df = df.set_index("Date")
-
-        # EMA
-        for span in (8, 21, 50, 200):
-            df[f"ema{span}"] = df["Close"].ewm(span=span, adjust=False).mean()
-
-        # ATR
-        if {"High", "Low", "Close"}.issubset(df.columns):
-            tr = pd.concat([
-                df["High"] - df["Low"],
-                (df["High"] - df["Close"].shift()).abs(),
-                (df["Low"] - df["Close"].shift()).abs(),
-            ], axis=1).max(axis=1)
-            df["atr14"] = tr.rolling(14).mean()
-        else:
-            df["atr14"] = df["Close"].pct_change().rolling(14).std() * df["Close"]
-
-        # RSI
-        delta = df["Close"].diff()
-        gain = delta.clip(lower=0)
-        loss = -delta.clip(upper=0)
-        avg_gain = gain.rolling(14).mean()
-        avg_loss = loss.rolling(14).mean()
-        rs = avg_gain / avg_loss.replace(0, np.nan)
-        df["rsi14"] = 100 - (100 / (1 + rs))
-
-        # Momentum & Volatility
-        df["mom5"] = df["Close"].pct_change(5)
-        df["vol10"] = df["Close"].pct_change().rolling(10).std()
-        df = df.dropna().reset_index()
+        df = investpy.get_currency_cross_historical_data(
+            currency_cross="XAU/USD",
+            from_date="01/01/2000",
+            to_date=datetime.now().strftime("%d/%m/%Y")
+        )
+        df.reset_index(inplace=True)
+        df.rename(columns=str.title, inplace=True)
+        df.to_csv(DAILY_FILE, index=False)
+        print(f"✅ Saved daily data → {DAILY_FILE} ({len(df)} rows)")
         return df
     except Exception as e:
-        print("⚠️ Indicator computation error:", e)
-        return pd.DataFrame()
+        print("❌ Fetch error from Investing.com:", e)
+        if DAILY_FILE.exists():
+            print("⚠️ Using cached daily data.")
+            return pd.read_csv(DAILY_FILE, parse_dates=["Date"])
+        else:
+            raise
 
 
-def fetch_yf(symbol, period, interval):
-    """Download data with yfinance safely, with adj close fallback."""
+def fetch_alpha_hourly():
+    """Fetch intraday (1h) XAU/USD from Alpha Vantage."""
+    print("📥 Fetching hourly XAU/USD from Alpha Vantage ...")
+    url = f"https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol=XAU&to_symbol=USD&interval=60min&apikey={ALPHAV_API_KEY}&outputsize=full"
     try:
-        df = yf.download(symbol, period=period, interval=interval, progress=False, threads=False)
-        if df.empty:
-            print(f"⚠️ Empty data ({symbol}, {period}, {interval})")
-            return pd.DataFrame()
-
-        # Fallback if Close missing
-        if "Close" not in df.columns and "Adj Close" in df.columns:
-            df["Close"] = df["Adj Close"]
-
-        df = df.dropna().reset_index()
-        return normalize_ohlcv_df(df)
+        r = requests.get(url, timeout=15)
+        data = r.json().get("Time Series FX (60min)", {})
+        if not data:
+            raise ValueError("Empty hourly dataset from Alpha Vantage.")
+        df = pd.DataFrame(data).T
+        df.columns = ["Open", "High", "Low", "Close"]
+        df = df.astype(float)
+        df["Date"] = pd.to_datetime(df.index)
+        df = df.sort_values("Date")
+        df.to_csv(HOURLY_FILE, index=False)
+        print(f"✅ Saved hourly data → {HOURLY_FILE} ({len(df)} rows)")
+        return df
     except Exception as e:
-        print(f"⚠️ yfinance error ({symbol}, {period}, {interval}): {e}")
+        print("❌ AlphaVantage error:", e)
+        if HOURLY_FILE.exists():
+            print("⚠️ Using cached hourly data.")
+            return pd.read_csv(HOURLY_FILE, parse_dates=["Date"])
         return pd.DataFrame()
 
 
-def fetch_and_build_datasets():
-    """Fetch and build hourly + daily datasets with fallbacks."""
-    print("📥 Fetching data from Yahoo Finance...")
-    df_day, df_hour = pd.DataFrame(), pd.DataFrame()
-
-    # --- Daily data fetch ---
-    for p in ["25y", "15y", "10y", "5y", "2y"]:
-        df_day = fetch_yf(YF_SYMBOL, period=p, interval="1d")
-        if not df_day.empty:
-            print(f"✅ Fetched daily ({p}) rows={len(df_day)}")
-            break
-
-    # --- Hourly data fetch ---
-    for p in ["2y", "1y", "6mo", "3mo"]:
-        df_hour = fetch_yf(YF_SYMBOL, period=p, interval="1h")
-        if not df_hour.empty:
-            print(f"✅ Fetched hourly ({p}) rows={len(df_hour)}")
-            break
-
-    if df_day.empty and df_hour.empty:
-        raise RuntimeError("❌ Failed to fetch any valid data from Yahoo Finance.")
-
-    os.makedirs("data", exist_ok=True)
-    if not df_day.empty:
-        df_day.to_csv("data/XAU_USD_Historical_Data_daily.csv", index=False)
-        print("💾 Saved daily data -> data/XAU_USD_Historical_Data_daily.csv")
-
-    if not df_hour.empty:
-        df_hour.to_csv("data/XAU_USD_Historical_Data_hourly.csv", index=False)
-        print("💾 Saved hourly data -> data/XAU_USD_Historical_Data_hourly.csv")
-
-    return df_day, df_hour
-
-
-# ---------------- MODEL TRAINING ----------------
-def train_simple_model(X, y, model_path):
-    if len(X) < 30:
+def train_model(X, y, model_path):
+    """Train RandomForest model with StandardScaler."""
+    if len(X) < 50:
+        print("⚠️ Not enough samples to train model.")
         return None
     split = int(len(X) * 0.8)
     X_train, X_val = X.iloc[:split], X.iloc[split:]
@@ -190,84 +120,73 @@ def train_simple_model(X, y, model_path):
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train)
     X_val_s = scaler.transform(X_val)
-    model = RandomForestClassifier(n_estimators=200, random_state=42)
+    model = RandomForestClassifier(n_estimators=300, random_state=42)
     model.fit(X_train_s, y_train)
     acc = model.score(X_val_s, y_val)
     joblib.dump(model, model_path)
     joblib.dump(scaler, str(model_path).replace(".pkl", "_scaler.pkl"))
-    print(f"🤖 Trained model saved at {model_path} (val acc={acc:.3f})")
+    print(f"🤖 Model saved {model_path.name} (val acc={acc:.3f})")
     return model
 
 
-# ---------------- PIPELINE ----------------
-def build_train_and_signal():
-    try:
-        fetch_and_build_datasets()
-    except Exception as e:
-        print("Fetch error:", e)
+# ======================================================
+# === SIGNAL PIPELINE ===
+# ======================================================
+def generate_signal(df, model_path, label):
+    """Generic function to compute indicators, train model, and get signal."""
+    df = compute_indicators(df)
+    df["target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
+    features = ["ema8", "ema21", "ema50", "atr14", "rsi14", "vol10", "mom5"]
+    df = df.dropna(subset=features + ["target"])
+    if df.empty:
+        print(f"⚠️ No data available for {label}")
+        return {"signal": "N/A", "confidence": 0}
 
-    results = {}
-
-    # HOURLY
-    if HOURLY_FILE.exists():
-        try:
-            dfh = pd.read_csv(HOURLY_FILE, parse_dates=["Date"])
-            dfh["target"] = (dfh["Close"].shift(-1) > dfh["Close"]).astype(int)
-            features_h = ["ema8", "ema21", "ema50", "atr14", "rsi14", "vol10", "mom5"]
-            dfh = dfh.dropna(subset=features_h + ["target"])
-            if len(dfh) >= 40:
-                Xh, yh = dfh[features_h], dfh["target"]
-                model_h = train_simple_model(Xh, yh, MODEL_HOUR)
-                scaler_h = joblib.load(str(MODEL_HOUR).replace(".pkl", "_scaler.pkl"))
-                last = Xh.iloc[[-1]]
-                prob = float(model_h.predict_proba(scaler_h.transform(last))[0][1])
-                pred = int(model_h.predict(scaler_h.transform(last))[0])
-                results["hour_signal"] = "BUY" if pred == 1 else "SELL"
-                results["hour_confidence"] = round(prob * 100, 2)
-        except Exception as e:
-            print("⚠️ Hourly model error:", e)
-            results["hour_signal"], results["hour_confidence"] = "N/A", 0.0
-
-    # DAILY
-    if DAILY_FILE.exists():
-        try:
-            dfd = pd.read_csv(DAILY_FILE, parse_dates=["Date"])
-            dfd["target"] = (dfd["Close"].shift(-1) > dfd["Close"]).astype(int)
-            features_d = ["ema21", "ema50", "atr14", "rsi14", "vol10", "mom5"]
-            dfd = dfd.dropna(subset=features_d + ["target"])
-            if len(dfd) >= 50:
-                Xd, yd = dfd[features_d], dfd["target"]
-                model_d = train_simple_model(Xd, yd, MODEL_DAY)
-                scaler_d = joblib.load(str(MODEL_DAY).replace(".pkl", "_scaler.pkl"))
-                last = Xd.iloc[[-1]]
-                prob = float(model_d.predict_proba(scaler_d.transform(last))[0][1])
-                pred = int(model_d.predict(scaler_d.transform(last))[0])
-                results["day_signal"] = "BUY" if pred == 1 else "SELL"
-                results["day_confidence"] = round(prob * 100, 2)
-        except Exception as e:
-            print("⚠️ Daily model error:", e)
-            results["day_signal"], results["day_confidence"] = "N/A", 0.0
-
-    out = {
+    model = train_model(df[features], df["target"], model_path)
+    scaler = joblib.load(str(model_path).replace(".pkl", "_scaler.pkl"))
+    last = df[features].iloc[[-1]]
+    prob = float(model.predict_proba(scaler.transform(last))[0][1])
+    pred = int(model.predict(scaler.transform(last))[0])
+    signal = "BUY" if pred == 1 else "SELL"
+    return {
+        "label": label,
         "timestamp": str(datetime.now(timezone.utc)),
-        **results
+        "signal": signal,
+        "confidence": round(prob * 100, 2)
     }
-    json.dump(out, open(SIGNALS_FILE, "w"), indent=2)
+
+
+def build_train_and_signal():
+    """Fetch, train, and generate both daily + hourly signals."""
+    daily_df = fetch_investing_daily()
+    hr_df = fetch_alpha_hourly()
+
+    day_sig = generate_signal(daily_df, MODEL_DAY, "Daily")
+    hr_sig = generate_signal(hr_df, MODEL_HR, "Hourly")
+
+    combined = {
+        "timestamp": str(datetime.now(timezone.utc)),
+        "daily": day_sig,
+        "hourly": hr_sig
+    }
+
+    json.dump(combined, open(SIGNALS_FILE, "w"), indent=2)
     history = []
     if HISTORY_FILE.exists():
         try:
             history = json.load(open(HISTORY_FILE))
         except Exception:
             history = []
-    history.append(out)
-    json.dump(history, open(HISTORY_FILE, "w"), indent=2)
+    history.append(combined)
+    json.dump(history[-100:], open(HISTORY_FILE, "w"), indent=2)
 
-    print(f"[{out['timestamp']}] Hour:{out.get('hour_signal')}({out.get('hour_confidence')}%) "
-          f"Day:{out.get('day_signal')}({out.get('day_confidence')}%)")
-    return out
+    print(f"[{combined['timestamp']}] 🕐 Hourly:{hr_sig['signal']}({hr_sig['confidence']}%) | 📅 Daily:{day_sig['signal']}({day_sig['confidence']}%)")
+    return combined
 
 
-# ---------------- BACKGROUND LOOP ----------------
+# ======================================================
+# === BACKGROUND LOOP ===
+# ======================================================
 def background_loop():
     while True:
         try:
@@ -282,7 +201,9 @@ def background_loop():
         time.sleep(REFRESH_INTERVAL_SECS)
 
 
-# ---------------- FLASK ROUTES ----------------
+# ======================================================
+# === FLASK ROUTES ===
+# ======================================================
 @app.route("/")
 def home():
     return jsonify({"status": "ok", "time": str(datetime.now(timezone.utc))})
@@ -308,25 +229,28 @@ def dashboard():
     try:
         current = json.load(open(SIGNALS_FILE))
     except Exception:
-        current = {"hour_signal": "N/A", "day_signal": "N/A", "hour_confidence": 0, "day_confidence": 0}
-
+        current = {"daily": {"signal": "N/A", "confidence": 0},
+                   "hourly": {"signal": "N/A", "confidence": 0}}
+    color_day = "#0f0" if current["daily"]["signal"] == "BUY" else "#f55"
+    color_hr = "#0f0" if current["hourly"]["signal"] == "BUY" else "#f55"
     return f"""
-    <html><head><title>XAU Agent</title><meta http-equiv="refresh" content="300"></head>
+    <html><head><title>XAU/USD AI Dashboard</title><meta http-equiv="refresh" content="600"></head>
     <body style="font-family:Arial;background:#0d1117;color:#fff;text-align:center;padding:40px;">
-    <h1>XAU/USD Agent</h1>
+    <h1>XAU/USD Dual-Timeframe AI Agent</h1>
     <div style="display:inline-block;background:#161b22;padding:20px;border-radius:12px;">
-      <h2>Hourly: <span style="color:{'#0f0' if current.get('hour_signal')=='BUY' else '#f55'}">{current.get('hour_signal')}</span></h2>
-      <p>Confidence: {current.get('hour_confidence')}%</p>
-      <h2>Daily: <span style="color:{'#0f0' if current.get('day_signal')=='BUY' else '#f55'}">{current.get('day_signal')}</span></h2>
-      <p>Confidence: {current.get('day_confidence')}%</p>
-      <p><button onclick="fetch('/signal').then(()=>location.reload())">Regenerate</button></p>
+      <h2>📅 Daily: <span style="color:{color_day}">{current['daily']['signal']}</span> ({current['daily']['confidence']}%)</h2>
+      <h2>🕐 Hourly: <span style="color:{color_hr}">{current['hourly']['signal']}</span> ({current['hourly']['confidence']}%)</h2>
+      <p><button onclick="fetch('/signal').then(()=>location.reload())">🔄 Refresh Signal</button></p>
+      <p>Last Update: {current.get('timestamp','N/A')}</p>
     </div>
     </body></html>
     """
 
 
-# ---------------- START ----------------
+# ======================================================
+# === START SERVER ===
+# ======================================================
 if __name__ == "__main__":
     threading.Thread(target=background_loop, daemon=True).start()
-    print(f"🚀 Starting Flask on port {PORT} | Refresh interval {REFRESH_INTERVAL_SECS}s | Symbol {YF_SYMBOL}")
+    print(f"🚀 Starting Flask on port {PORT} | Refresh interval {REFRESH_INTERVAL_SECS}s (Investpy + AlphaVantage)")
     app.run(host="0.0.0.0", port=PORT)
