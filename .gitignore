@@ -1,28 +1,46 @@
-# Python ignores
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 .env
+.venv
+.env.*
 venv/
-ENV/
-env/
+virtualenv/
 
-# System & temp files
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# Logs and runtime
+logs/
+*.log
+data/
+models/
+*.sqlite3
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Logs and checkpoints
-*.log
-.ipynb_checkpoints/
-
-# Allow AI model & dataset files for Render
-!model.pkl
-!features_full_daily.csv
-!XAU_USD_Historical_Data_daily.csv
-!XAU_USD_Historical_Data_weekly.csv
-!XAU_USD_Historical_Data_monthly.csv
-
-# Allow backtest and performance outputs
-!backtest_results.csv
-!strategy_performance.png
+# Render / secrets
+render.yaml.local
