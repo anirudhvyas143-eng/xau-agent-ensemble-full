@@ -1,6 +1,7 @@
-# main.py — XAU/USD AI Agent (Investpy + AlphaVantage hybrid, daily + hourly)
+# main.py — XAU/USD AI Agent (Investing.com via RapidAPI + AlphaVantage hybrid)
+
 from flask import Flask, jsonify
-import pandas as pd, numpy as np, investpy, joblib, json, threading, time, os, requests
+import pandas as pd, numpy as np, joblib, json, threading, time, os, requests
 from datetime import datetime, timezone
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -28,8 +29,8 @@ HISTORY_FILE = ROOT / "signals_history.json"
 REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))  # hourly retrain
 PORT = int(os.getenv("PORT", 10000))
 SELF_PING_URL = os.getenv("SELF_PING_URL", None)
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "demo")  # replace with your real RapidAPI key
 ALPHAV_API_KEY = os.getenv("ALPHAV_API_KEY", "demo")  # replace later with your key
-
 
 # ======================================================
 # === UTILITIES ===
@@ -60,29 +61,34 @@ def compute_indicators(df):
     df = df.dropna().reset_index(drop=True)
     return df
 
-
+# ======================================================
+# === DATA FETCHING ===
+# ======================================================
 def fetch_investing_daily():
-    """Fetch 20+ years of daily XAU/USD data from Investing.com."""
-    print("📥 Fetching daily XAU/USD from Investing.com ...")
+    """Fetch daily XAU/USD data from Investing.com via RapidAPI."""
+    print("📥 Fetching daily XAU/USD data (RapidAPI)...")
+    url = "https://investing-com.p.rapidapi.com/price/historical"
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": "investing-com.p.rapidapi.com"
+    }
+    params = {"symbol": "XAU/USD", "interval": "1d", "from": "2000-01-01"}
     try:
-        df = investpy.get_currency_cross_historical_data(
-            currency_cross="XAU/USD",
-            from_date="01/01/2000",
-            to_date=datetime.now().strftime("%d/%m/%Y")
-        )
-        df.reset_index(inplace=True)
-        df.rename(columns=str.title, inplace=True)
+        res = requests.get(url, headers=headers, params=params, timeout=20)
+        data = res.json()
+        df = pd.DataFrame(data["data"])
+        df["Date"] = pd.to_datetime(df["date"])
+        df.rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close"}, inplace=True)
+        df = df[["Date", "Open", "High", "Low", "Close"]].sort_values("Date")
         df.to_csv(DAILY_FILE, index=False)
         print(f"✅ Saved daily data → {DAILY_FILE} ({len(df)} rows)")
         return df
     except Exception as e:
-        print("❌ Fetch error from Investing.com:", e)
+        print("❌ RapidAPI fetch error:", e)
         if DAILY_FILE.exists():
             print("⚠️ Using cached daily data.")
             return pd.read_csv(DAILY_FILE, parse_dates=["Date"])
-        else:
-            raise
-
+        return pd.DataFrame()
 
 def fetch_alpha_hourly():
     """Fetch intraday (1h) XAU/USD from Alpha Vantage."""
@@ -108,7 +114,9 @@ def fetch_alpha_hourly():
             return pd.read_csv(HOURLY_FILE, parse_dates=["Date"])
         return pd.DataFrame()
 
-
+# ======================================================
+# === MODELING ===
+# ======================================================
 def train_model(X, y, model_path):
     """Train RandomForest model with StandardScaler."""
     if len(X) < 50:
@@ -128,10 +136,6 @@ def train_model(X, y, model_path):
     print(f"🤖 Model saved {model_path.name} (val acc={acc:.3f})")
     return model
 
-
-# ======================================================
-# === SIGNAL PIPELINE ===
-# ======================================================
 def generate_signal(df, model_path, label):
     """Generic function to compute indicators, train model, and get signal."""
     df = compute_indicators(df)
@@ -155,7 +159,9 @@ def generate_signal(df, model_path, label):
         "confidence": round(prob * 100, 2)
     }
 
-
+# ======================================================
+# === SIGNAL PIPELINE ===
+# ======================================================
 def build_train_and_signal():
     """Fetch, train, and generate both daily + hourly signals."""
     daily_df = fetch_investing_daily()
@@ -183,7 +189,6 @@ def build_train_and_signal():
     print(f"[{combined['timestamp']}] 🕐 Hourly:{hr_sig['signal']}({hr_sig['confidence']}%) | 📅 Daily:{day_sig['signal']}({day_sig['confidence']}%)")
     return combined
 
-
 # ======================================================
 # === BACKGROUND LOOP ===
 # ======================================================
@@ -200,7 +205,6 @@ def background_loop():
             print("Background loop error:", e)
         time.sleep(REFRESH_INTERVAL_SECS)
 
-
 # ======================================================
 # === FLASK ROUTES ===
 # ======================================================
@@ -208,11 +212,9 @@ def background_loop():
 def home():
     return jsonify({"status": "ok", "time": str(datetime.now(timezone.utc))})
 
-
 @app.route("/signal")
 def signal_route():
     return jsonify(build_train_and_signal())
-
 
 @app.route("/history")
 def history_route():
@@ -222,7 +224,6 @@ def history_route():
         except Exception:
             return jsonify([])
     return jsonify([])
-
 
 @app.route("/dashboard")
 def dashboard():
@@ -246,11 +247,10 @@ def dashboard():
     </body></html>
     """
 
-
 # ======================================================
 # === START SERVER ===
 # ======================================================
 if __name__ == "__main__":
     threading.Thread(target=background_loop, daemon=True).start()
-    print(f"🚀 Starting Flask on port {PORT} | Refresh interval {REFRESH_INTERVAL_SECS}s (Investpy + AlphaVantage)")
+    print(f"🚀 Starting Flask on port {PORT} | Refresh interval {REFRESH_INTERVAL_SECS}s (RapidAPI + AlphaVantage)")
     app.run(host="0.0.0.0", port=PORT)
