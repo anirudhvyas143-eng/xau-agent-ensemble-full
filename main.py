@@ -1,5 +1,4 @@
 # main.py — XAU/USD AI Agent (Investing.com via RapidAPI + AlphaVantage hybrid)
-
 from flask import Flask, jsonify
 import pandas as pd, numpy as np, joblib, json, threading, time, os, requests
 from datetime import datetime, timezone
@@ -29,18 +28,19 @@ HISTORY_FILE = ROOT / "signals_history.json"
 REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))  # hourly retrain
 PORT = int(os.getenv("PORT", 10000))
 SELF_PING_URL = os.getenv("SELF_PING_URL", None)
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "demo")  # replace with your real RapidAPI key
-ALPHAV_API_KEY = os.getenv("ALPHAV_API_KEY", "demo")  # replace later with your key
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "demo")      # from Render env
+ALPHAV_API_KEY = os.getenv("ALPHAV_API_KEY", "demo")  # from Render env
 
 # ======================================================
-# === UTILITIES ===
+# === INDICATOR ENGINE ===
 # ======================================================
 def compute_indicators(df):
-    """Compute key technical indicators for training and signals."""
+    """Compute key technical indicators."""
     df = df.copy()
     df["ema8"] = df["Close"].ewm(span=8, adjust=False).mean()
     df["ema21"] = df["Close"].ewm(span=21, adjust=False).mean()
     df["ema50"] = df["Close"].ewm(span=50, adjust=False).mean()
+
     tr = pd.concat([
         df["High"] - df["Low"],
         (df["High"] - df["Close"].shift()).abs(),
@@ -58,11 +58,12 @@ def compute_indicators(df):
 
     df["mom5"] = df["Close"].pct_change(5)
     df["vol10"] = df["Close"].pct_change().rolling(10).std()
+
     df = df.dropna().reset_index(drop=True)
     return df
 
 # ======================================================
-# === DATA FETCHING ===
+# === DATA FETCHING (Investing + Alpha) ===
 # ======================================================
 def fetch_investing_daily():
     """Fetch daily XAU/USD data from Investing.com via RapidAPI."""
@@ -73,6 +74,7 @@ def fetch_investing_daily():
         "x-rapidapi-host": "investing-com.p.rapidapi.com"
     }
     params = {"symbol": "XAU/USD", "interval": "1d", "from": "2000-01-01"}
+
     try:
         res = requests.get(url, headers=headers, params=params, timeout=20)
         data = res.json()
@@ -91,9 +93,14 @@ def fetch_investing_daily():
         return pd.DataFrame()
 
 def fetch_alpha_hourly():
-    """Fetch intraday (1h) XAU/USD from Alpha Vantage."""
-    print("📥 Fetching hourly XAU/USD from Alpha Vantage ...")
-    url = f"https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol=XAU&to_symbol=USD&interval=60min&apikey={ALPHAV_API_KEY}&outputsize=full"
+    """Fetch hourly XAU/USD data from Alpha Vantage."""
+    print("📥 Fetching hourly XAU/USD data (Alpha Vantage)...")
+    url = (
+        f"https://www.alphavantage.co/query?function=FX_INTRADAY"
+        f"&from_symbol=XAU&to_symbol=USD&interval=60min"
+        f"&apikey={ALPHAV_API_KEY}&outputsize=full"
+    )
+
     try:
         r = requests.get(url, timeout=15)
         data = r.json().get("Time Series FX (60min)", {})
@@ -115,35 +122,38 @@ def fetch_alpha_hourly():
         return pd.DataFrame()
 
 # ======================================================
-# === MODELING ===
+# === MODEL + SIGNAL ===
 # ======================================================
 def train_model(X, y, model_path):
-    """Train RandomForest model with StandardScaler."""
+    """Train RandomForest with StandardScaler."""
     if len(X) < 50:
         print("⚠️ Not enough samples to train model.")
         return None
     split = int(len(X) * 0.8)
     X_train, X_val = X.iloc[:split], X.iloc[split:]
     y_train, y_val = y.iloc[:split], y.iloc[split:]
+
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train)
     X_val_s = scaler.transform(X_val)
+
     model = RandomForestClassifier(n_estimators=300, random_state=42)
     model.fit(X_train_s, y_train)
     acc = model.score(X_val_s, y_val)
+
     joblib.dump(model, model_path)
     joblib.dump(scaler, str(model_path).replace(".pkl", "_scaler.pkl"))
     print(f"🤖 Model saved {model_path.name} (val acc={acc:.3f})")
     return model
 
 def generate_signal(df, model_path, label):
-    """Generic function to compute indicators, train model, and get signal."""
+    """Compute indicators, train model, and output signal."""
     df = compute_indicators(df)
     df["target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
     features = ["ema8", "ema21", "ema50", "atr14", "rsi14", "vol10", "mom5"]
     df = df.dropna(subset=features + ["target"])
     if df.empty:
-        print(f"⚠️ No data available for {label}")
+        print(f"⚠️ No valid rows for {label}")
         return {"signal": "N/A", "confidence": 0}
 
     model = train_model(df[features], df["target"], model_path)
@@ -152,6 +162,7 @@ def generate_signal(df, model_path, label):
     prob = float(model.predict_proba(scaler.transform(last))[0][1])
     pred = int(model.predict(scaler.transform(last))[0])
     signal = "BUY" if pred == 1 else "SELL"
+
     return {
         "label": label,
         "timestamp": str(datetime.now(timezone.utc)),
@@ -163,7 +174,7 @@ def generate_signal(df, model_path, label):
 # === SIGNAL PIPELINE ===
 # ======================================================
 def build_train_and_signal():
-    """Fetch, train, and generate both daily + hourly signals."""
+    """Fetch, train, and produce both daily + hourly signals."""
     daily_df = fetch_investing_daily()
     hr_df = fetch_alpha_hourly()
 
@@ -190,7 +201,7 @@ def build_train_and_signal():
     return combined
 
 # ======================================================
-# === BACKGROUND LOOP ===
+# === BACKGROUND REFRESH LOOP ===
 # ======================================================
 def background_loop():
     while True:
@@ -232,8 +243,10 @@ def dashboard():
     except Exception:
         current = {"daily": {"signal": "N/A", "confidence": 0},
                    "hourly": {"signal": "N/A", "confidence": 0}}
+
     color_day = "#0f0" if current["daily"]["signal"] == "BUY" else "#f55"
     color_hr = "#0f0" if current["hourly"]["signal"] == "BUY" else "#f55"
+
     return f"""
     <html><head><title>XAU/USD AI Dashboard</title><meta http-equiv="refresh" content="600"></head>
     <body style="font-family:Arial;background:#0d1117;color:#fff;text-align:center;padding:40px;">
@@ -252,5 +265,5 @@ def dashboard():
 # ======================================================
 if __name__ == "__main__":
     threading.Thread(target=background_loop, daemon=True).start()
-    print(f"🚀 Starting Flask on port {PORT} | Refresh interval {REFRESH_INTERVAL_SECS}s (RapidAPI + AlphaVantage)")
+    print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL_SECS}s (RapidAPI + AlphaVantage)")
     app.run(host="0.0.0.0", port=PORT)
