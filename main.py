@@ -125,37 +125,58 @@ def compute_indicators(df):
     except Exception as e:
         print("⚠️ Indicator computation error:", e)
         return pd.DataFrame()
-
-
 def fetch_yf(symbol, period, interval):
-    """Download data with yfinance."""
+    """Download data with yfinance safely."""
+    import yfinance as yf
     try:
-        df = yf.download(symbol, period=period, interval=interval, progress=False)
+        df = yf.download(symbol, period=period, interval=interval, progress=False, threads=False)
+        if df.empty or "Close" not in df.columns:
+            print(f"⚠️ Empty or invalid data ({symbol}, {period}, {interval})")
+            return pd.DataFrame()
+        df = df.dropna().reset_index()
         return normalize_ohlcv_df(df)
     except Exception as e:
-        print(f"⚠️ yfinance error ({symbol}, {period}, {interval}):", e)
+        print(f"⚠️ yfinance error ({symbol}, {period}, {interval}): {e}")
         return pd.DataFrame()
 
 
-# ---------------- FETCH + BUILD ----------------
 def fetch_and_build_datasets():
+    """Fetch and build hourly + daily datasets with fallbacks."""
     print("📥 Fetching data from Yahoo Finance...")
     df_day = pd.DataFrame()
-    for p in ["25y", "15y", "10y", "5y"]:
+    df_hour = pd.DataFrame()
+
+    # --- Daily data fetch (up to 10 years) ---
+    for p in ["10y", "5y", "2y", "1y"]:
         df_day = fetch_yf(YF_SYMBOL, period=p, interval="1d")
         if not df_day.empty:
             print(f"✅ Fetched daily ({p}) rows={len(df_day)}")
             break
 
-    df_hour = pd.DataFrame()
-    for p in ["5y", "2y", "1y", "60d"]:
+    # --- Hourly data fetch (up to 2 years max) ---
+    for p in ["2y", "1y", "6mo", "3mo"]:
         df_hour = fetch_yf(YF_SYMBOL, period=p, interval="1h")
         if not df_hour.empty:
             print(f"✅ Fetched hourly ({p}) rows={len(df_hour)}")
             break
 
+    # --- Handle failures gracefully ---
     if df_day.empty and df_hour.empty:
         raise RuntimeError("❌ Failed to fetch any valid data from Yahoo Finance.")
+
+    # --- Save datasets locally ---
+    os.makedirs("data", exist_ok=True)
+    if not df_day.empty:
+        df_day.to_csv("data/XAU_USD_Historical_Data_daily.csv", index=False)
+        print("💾 Saved daily data -> data/XAU_USD_Historical_Data_daily.csv")
+
+    if not df_hour.empty:
+        df_hour.to_csv("data/XAU_USD_Historical_Data_hourly.csv", index=False)
+        print("💾 Saved hourly data -> data/XAU_USD_Historical_Data_hourly.csv")
+
+    return df_day, df_hour
+
+
 
     # Daily pipeline
     if not df_day.empty:
