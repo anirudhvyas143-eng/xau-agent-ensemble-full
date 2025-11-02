@@ -11,7 +11,9 @@ from sklearn.ensemble import RandomForestClassifier
 # ======================================================
 # 🔧 CONFIGURATION
 # ======================================================
-ALPHAV_API_KEY = "XWZFB7RP8I4SWCMZ"  # Your working Alpha Vantage key
+ALPHAV_API_KEY = "XUU2PYO481XBYWR4"   # ✅ Working Alpha Vantage key
+RAPID_API_KEY = os.getenv("RAPID_API_KEY", "58cdeafeb6msh0a464937e4dacfep1554e1jsned5c2fa7d90e")  # 🔑 RapidAPI key (set via environment)
+
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -21,129 +23,113 @@ HOURLY_FILE = os.path.join(DATA_DIR, "XAU_USD_Historical_Data_hourly.csv")
 app = Flask(__name__)
 
 # ======================================================
-# 🪙 Fetch Alpha Vantage Data
+# 🪙 Alpha Vantage — Daily Commodity Data
 # ======================================================
-
 def fetch_alpha_daily():
-    """Fetch daily gold price using Alpha Vantage DIGITAL_CURRENCY_DAILY endpoint."""
-    print("📥 Fetching daily XAU/USD data (Alpha Vantage DIGITAL_CURRENCY_DAILY)...")
-
-    url = f"https://www.alphavantage.co/query"
+    print("📥 Fetching daily XAU/USD data (Alpha Vantage COMMODITY_DAILY)...")
+    url = "https://www.alphavantage.co/query"
     params = {
-        "function": "DIGITAL_CURRENCY_DAILY",
-        "symbol": "XAU",
-        "market": "USD",
+        "function": "COMMODITY_DAILY",
+        "symbol": "XAUUSD",
         "apikey": ALPHAV_API_KEY
     }
-
     try:
         r = requests.get(url, params=params, timeout=30)
         data = r.json()
 
-        if "Time Series (Digital Currency Daily)" not in data:
-            raise ValueError("Empty daily dataset from Alpha Vantage (XAU/USD).")
+        if "data" not in data or len(data["data"]) == 0:
+            raise ValueError("Empty daily dataset from Alpha Vantage COMMODITY_DAILY.")
 
-        df = pd.DataFrame.from_dict(data["Time Series (Digital Currency Daily)"], orient="index")
-        df = df.rename(columns={
-            "1a. open (USD)": "open",
-            "2a. high (USD)": "high",
-            "3a. low (USD)": "low",
-            "4a. close (USD)": "close",
-            "5. volume": "volume"
-        })
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-        df.to_csv(DAILY_FILE)
+        df = pd.DataFrame(data["data"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.rename(columns={"open": "open", "high": "high", "low": "low", "close": "close"})
+        df = df.sort_values("timestamp")
+        df.to_csv(DAILY_FILE, index=False)
+
         print(f"✅ Saved daily data → {DAILY_FILE} ({len(df)} rows)")
         return df
 
     except Exception as e:
-        print(f"❌ AlphaVantage daily fetch error: {e}")
+        print(f"❌ Alpha Vantage daily fetch error: {e}")
         return pd.DataFrame()
 
-
-def fetch_alpha_hourly():
-    """Simulate hourly gold price from latest daily data."""
-    print("📥 Fetching simulated hourly XAU/USD data (from daily)...")
-
+# ======================================================
+# ⏱ RapidAPI — Hourly Gold Data
+# ======================================================
+def fetch_hourly_rapidapi():
+    print("📥 Fetching hourly XAU/USD data (RapidAPI Gold-Price-Live)...")
+    url = "https://gold-price-live.p.rapidapi.com/get_metal_prices/XAUUSD"
+    headers = {
+        "x-rapidapi-key": RAPID_API_KEY.strip(),
+        "x-rapidapi-host": "gold-price-live.p.rapidapi.com"
+    }
     try:
-        if not os.path.exists(DAILY_FILE):
-            raise FileNotFoundError("Daily file missing for hourly generation.")
+        r = requests.get(url, headers=headers, timeout=30)
+        data = r.json()
 
-        daily_df = pd.read_csv(DAILY_FILE)
-        if len(daily_df) == 0:
-            raise ValueError("Daily dataset empty.")
+        if "result" not in data or not data["result"]:
+            raise ValueError("Empty hourly dataset from RapidAPI.")
 
-        # Use last close price and simulate 24 hourly fluctuations
-        last_price = float(daily_df["close"].iloc[-1])
-        hours = pd.date_range(end=datetime.utcnow(), periods=24, freq="H")
-        hourly_data = {
-            "timestamp": hours,
-            "close": [last_price * (1 + (i - 12) / 1000) for i in range(24)]
-        }
-
-        hourly_df = pd.DataFrame(hourly_data)
-        hourly_df.to_csv(HOURLY_FILE, index=False)
-        print(f"✅ Simulated hourly data → {HOURLY_FILE} ({len(hourly_df)} rows)")
-        return hourly_df
+        df = pd.DataFrame(data["result"])
+        if "timestamp" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s", errors="coerce")
+        df = df.rename(columns={
+            "open": "open", "high": "high", "low": "low", "price": "close"
+        })
+        df.to_csv(HOURLY_FILE, index=False)
+        print(f"✅ Saved hourly data → {HOURLY_FILE} ({len(df)} rows)")
+        return df
 
     except Exception as e:
-        print(f"❌ AlphaVantage hourly fetch error: {e}")
+        print(f"❌ RapidAPI hourly fetch error: {e}")
         return pd.DataFrame()
 
 # ======================================================
-# 🤖 Train Model (Daily)
+# 🤖 Train Model (Daily Close)
 # ======================================================
-
 def train_simple_model():
-    """Train a simple model using daily gold price data."""
     if not os.path.exists(DAILY_FILE):
         print("⚠️ No daily file yet, skipping model training.")
         return None
 
     df = pd.read_csv(DAILY_FILE)
-    if len(df) < 5:
-        print("⚠️ Not enough data to train model.")
+    if "close" not in df.columns or len(df) < 10:
+        print("⚠️ Not enough valid data for model.")
         return None
 
-    df["target"] = (df["price"].shift(-1) > df["price"]).astype(int)
-    X = df[["price"]].fillna(0)
+    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
+    X = df[["close"]].fillna(0)
     y = df["target"].fillna(0)
-
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
     model = RandomForestClassifier(n_estimators=20, random_state=42)
     model.fit(X_train, y_train)
     acc = model.score(X_test, y_test)
     pickle.dump(model, open("model_day.pkl", "wb"))
-    print(f"🤖 Model saved model_day.pkl (val acc={acc:.3f})")
+    print(f"🤖 Model saved (val acc = {acc:.3f})")
     return model
 
 # ======================================================
-# 🌐 Flask Routes
+# 🌐 Flask Endpoints
 # ======================================================
-
 @app.route("/")
 def home():
     daily_df = pd.read_csv(DAILY_FILE) if os.path.exists(DAILY_FILE) else pd.DataFrame()
     hourly_df = pd.read_csv(HOURLY_FILE) if os.path.exists(HOURLY_FILE) else pd.DataFrame()
-
-    response = {
+    return jsonify({
         "daily_latest": daily_df.tail(1).to_dict(orient="records"),
         "hourly_latest": hourly_df.tail(1).to_dict(orient="records"),
-        "message": "AlphaVantage data fetched successfully"
-    }
-    return jsonify(response)
-
+        "message": "AlphaVantage (daily) + RapidAPI (hourly)"
+    })
 
 @app.route("/signal")
 def signal():
-    """Return the latest BUY/SELL signal from the trained model."""
     if not os.path.exists("model_day.pkl") or not os.path.exists(DAILY_FILE):
         return jsonify({"signal": "N/A", "reason": "Model or data missing"})
 
     model = pickle.load(open("model_day.pkl", "rb"))
     df = pd.read_csv(DAILY_FILE)
-    latest_price = df["price"].iloc[-1]
+    latest_price = df["close"].iloc[-1]
     pred = model.predict([[latest_price]])[0]
     signal = "BUY" if pred == 1 else "SELL"
 
@@ -156,19 +142,17 @@ def signal():
 # ======================================================
 # 🚀 MAIN LOOP
 # ======================================================
-
 if __name__ == "__main__":
-    print("🚀 Starting Flask on port 10000 | Refresh every 900s (AlphaVantage only)")
-
+    print("🚀 Starting Flask on port 10000 | Refresh every 900s (AlphaVantage + RapidAPI)")
     while True:
         daily = fetch_alpha_daily()
-        hourly = fetch_alpha_hourly()
+        hourly = fetch_hourly_rapidapi()
         train_simple_model()
 
         if not daily.empty:
-            print(f"[{datetime.utcnow()}] 📅 Daily: {daily['price'].iloc[-1]:.2f}")
+            print(f"[{datetime.utcnow()}] 📅 Daily close: {daily['close'].iloc[-1]}")
         if not hourly.empty:
-            print(f"[{datetime.utcnow()}] 🕐 Hourly: {hourly['close'].iloc[-1]}")
+            print(f"[{datetime.utcnow()}] 🕐 Hourly close: {hourly['close'].iloc[-1]}")
 
         app.run(host="0.0.0.0", port=10000)
         print("⏳ Waiting 15 minutes before refreshing data...")
