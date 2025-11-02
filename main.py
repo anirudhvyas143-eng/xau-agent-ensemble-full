@@ -25,14 +25,14 @@ app = Flask(__name__)
 # ======================================================
 
 def fetch_alpha_daily():
-    """Fetch daily gold price (COMMODITY_EXCHANGE_RATE endpoint)."""
-    print("📥 Fetching daily XAU/USD data (Alpha Vantage COMMODITY)...")
+    """Fetch daily gold price using Alpha Vantage DIGITAL_CURRENCY_DAILY endpoint."""
+    print("📥 Fetching daily XAU/USD data (Alpha Vantage DIGITAL_CURRENCY_DAILY)...")
 
     url = f"https://www.alphavantage.co/query"
     params = {
-        "function": "COMMODITY_EXCHANGE_RATE",
-        "from_symbol": "XAU",
-        "to_symbol": "USD",
+        "function": "DIGITAL_CURRENCY_DAILY",
+        "symbol": "XAU",
+        "market": "USD",
         "apikey": ALPHAV_API_KEY
     }
 
@@ -40,16 +40,20 @@ def fetch_alpha_daily():
         r = requests.get(url, params=params, timeout=30)
         data = r.json()
 
-        # Parse response safely
-        if "Realtime Commodity Exchange Rate" not in data:
-            raise ValueError("Empty daily dataset from Alpha Vantage.")
+        if "Time Series (Digital Currency Daily)" not in data:
+            raise ValueError("Empty daily dataset from Alpha Vantage (XAU/USD).")
 
-        row = data["Realtime Commodity Exchange Rate"]
-        df = pd.DataFrame([{
-            "timestamp": datetime.utcnow(),
-            "price": float(row["5. Exchange Rate"])
-        }])
-        df.to_csv(DAILY_FILE, index=False)
+        df = pd.DataFrame.from_dict(data["Time Series (Digital Currency Daily)"], orient="index")
+        df = df.rename(columns={
+            "1a. open (USD)": "open",
+            "2a. high (USD)": "high",
+            "3a. low (USD)": "low",
+            "4a. close (USD)": "close",
+            "5. volume": "volume"
+        })
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        df.to_csv(DAILY_FILE)
         print(f"✅ Saved daily data → {DAILY_FILE} ({len(df)} rows)")
         return df
 
@@ -59,38 +63,29 @@ def fetch_alpha_daily():
 
 
 def fetch_alpha_hourly():
-    """Fetch hourly XAUUSD price (FX_INTRADAY endpoint)."""
-    print("📥 Fetching hourly XAU/USD data (Alpha Vantage FOREX)...")
-
-    url = f"https://www.alphavantage.co/query"
-    params = {
-        "function": "FX_INTRADAY",
-        "from_symbol": "XAU",
-        "to_symbol": "USD",
-        "interval": "60min",
-        "apikey": ALPHAV_API_KEY,
-        "outputsize": "compact"
-    }
+    """Simulate hourly gold price from latest daily data."""
+    print("📥 Fetching simulated hourly XAU/USD data (from daily)...")
 
     try:
-        r = requests.get(url, params=params, timeout=30)
-        data = r.json()
+        if not os.path.exists(DAILY_FILE):
+            raise FileNotFoundError("Daily file missing for hourly generation.")
 
-        if "Time Series FX (60min)" not in data:
-            raise ValueError("Empty hourly dataset from Alpha Vantage.")
+        daily_df = pd.read_csv(DAILY_FILE)
+        if len(daily_df) == 0:
+            raise ValueError("Daily dataset empty.")
 
-        df = pd.DataFrame.from_dict(data["Time Series FX (60min)"], orient="index")
-        df = df.rename(columns={
-            "1. open": "open",
-            "2. high": "high",
-            "3. low": "low",
-            "4. close": "close"
-        })
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-        df.to_csv(HOURLY_FILE)
-        print(f"✅ Saved hourly data → {HOURLY_FILE} ({len(df)} rows)")
-        return df
+        # Use last close price and simulate 24 hourly fluctuations
+        last_price = float(daily_df["close"].iloc[-1])
+        hours = pd.date_range(end=datetime.utcnow(), periods=24, freq="H")
+        hourly_data = {
+            "timestamp": hours,
+            "close": [last_price * (1 + (i - 12) / 1000) for i in range(24)]
+        }
+
+        hourly_df = pd.DataFrame(hourly_data)
+        hourly_df.to_csv(HOURLY_FILE, index=False)
+        print(f"✅ Simulated hourly data → {HOURLY_FILE} ({len(hourly_df)} rows)")
+        return hourly_df
 
     except Exception as e:
         print(f"❌ AlphaVantage hourly fetch error: {e}")
