@@ -8,33 +8,31 @@ import pickle
 import threading
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-import random
 
 # ======================================================
 # 🔧 CONFIGURATION
 # ======================================================
 
-# ✅ Only the three Alpha Vantage API keys you provided (no extras)
+# ✅ Alpha Vantage API keys (your 3 keys)
 ALPHAV_API_KEYS = [
-    "XWZFB7RP8I4SWCMZ",  # key A
-    "XUU2PYO481XBYWR4",  # key B
-    "94CMKYJJQUVN51AT",  # key C
+    "XWZFB7RP8I4SWCMZ",  # key A (old)
+    "XUU2PYO481XBYWR4",  # key B (old)
+    "94CMKYJJQUVN51AT",  # key C (new, unused)
 ]
 
-# pick one at start (will rotate on failures)
-ALPHAV_API_KEY = random.choice(ALPHAV_API_KEYS)
+# ✅ Always start with the newest key
+ALPHAV_API_KEY = ALPHAV_API_KEYS[-1]
 print(f"🔑 Starting with Alpha Vantage key ending with ...{ALPHAV_API_KEY[-4:]}")
 
-SYMBOL = "GLD"  # GLD ETF used as reliable gold proxy (alpha supports symbol-based endpoints)
+SYMBOL = "GLD"  # GLD ETF used as reliable gold proxy (Alpha supports symbol endpoints)
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 DAILY_FILE = os.path.join(DATA_DIR, f"{SYMBOL}_daily.csv")
 HOURLY_FILE = os.path.join(DATA_DIR, f"{SYMBOL}_hourly.csv")
 
-# 2 hours refresh to stay within free-tier rate limits
-REFRESH_INTERVAL = 7200
-print(f"⏱️ Refresh interval set to {REFRESH_INTERVAL // 60} minutes (safe for Alpha Vantage free tier).")
+REFRESH_INTERVAL = 7200  # every 2 hours (safe for free tier)
+print(f"⏱️ Refresh interval set to {REFRESH_INTERVAL // 60} minutes (Alpha Vantage safe limit).")
 
 app = Flask(__name__)
 
@@ -42,10 +40,10 @@ app = Flask(__name__)
 # 🔁 Helper: Rotate API keys if one fails
 # ======================================================
 def try_alpha_request(params):
-    """Try AlphaVantage request with key rotation. Returns parsed JSON or {}."""
+    """Try AlphaVantage request with key rotation."""
     global ALPHAV_API_KEY
-
     base = "https://www.alphavantage.co/query"
+
     for key in ALPHAV_API_KEYS:
         params["apikey"] = key
         try:
@@ -55,22 +53,20 @@ def try_alpha_request(params):
             print(f"⚠️ Network/error with key ...{key[-4:]}: {e}")
             continue
 
-        # If they returned an error/information about limits, skip to next
         msg = str(data)
         if "Thank you for using Alpha Vantage" in msg or "rate limit" in msg or "Invalid API call" in msg:
             print(f"⚠️ Key ending with ...{key[-4:]} returned info/limit message; rotating to next key.")
             continue
 
-        # Successful-ish payload (we still validate presence of expected keys later)
         ALPHAV_API_KEY = key
-        print(f"✅ Data returned using key ending with ...{key[-4:]}")
+        print(f"✅ Data successfully fetched using key ending with ...{key[-4:]}")
         return data
 
     print("❌ All Alpha Vantage keys exhausted or invalid for this request.")
     return {}
 
 # ======================================================
-# 🪙 Fetch Daily Data (TIME_SERIES_DAILY)
+# 🪙 Fetch Daily Data
 # ======================================================
 def fetch_alpha_daily():
     print("📥 Fetching daily GLD data (Alpha Vantage TIME_SERIES_DAILY)...")
@@ -83,7 +79,7 @@ def fetch_alpha_daily():
     try:
         data = try_alpha_request(params)
         if "Time Series (Daily)" not in data:
-            raise ValueError(f"Empty/invalid daily dataset from Alpha Vantage: {data}")
+            raise ValueError(f"Empty/invalid daily dataset: {data}")
 
         df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient="index")
         df = df.rename(columns={
@@ -104,7 +100,7 @@ def fetch_alpha_daily():
         return pd.DataFrame()
 
 # ======================================================
-# ⏰ Fetch Hourly Data (TIME_SERIES_INTRADAY)
+# ⏰ Fetch Hourly Data
 # ======================================================
 def fetch_alpha_hourly():
     print("📥 Fetching hourly GLD data (Alpha Vantage TIME_SERIES_INTRADAY)...")
@@ -118,7 +114,7 @@ def fetch_alpha_hourly():
     try:
         data = try_alpha_request(params)
         if "Time Series (60min)" not in data:
-            raise ValueError(f"Empty/invalid hourly dataset from Alpha Vantage: {data}")
+            raise ValueError(f"Empty/invalid hourly dataset: {data}")
 
         df = pd.DataFrame.from_dict(data["Time Series (60min)"], orient="index")
         df = df.rename(columns={
@@ -159,7 +155,7 @@ def train_model():
     with open("model.pkl", "wb") as f:
         pickle.dump(model, f)
 
-    print("✅ Model trained and saved.")
+    print("✅ Model trained and saved successfully.")
 
 # ======================================================
 # 🔁 Background Task
@@ -182,7 +178,7 @@ def home():
         "status": "running",
         "time": datetime.utcnow().isoformat(),
         "active_api_key": ALPHAV_API_KEY[-4:],
-        "message": "XAU Agent (Alpha Vantage multi-key rotation) is live 🚀"
+        "message": "✅ XAU Agent (Alpha Vantage multi-key rotation) is live"
     })
 
 @app.route("/predict")
