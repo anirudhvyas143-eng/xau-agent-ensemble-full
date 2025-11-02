@@ -28,7 +28,7 @@ HISTORY_FILE = ROOT / "signals_history.json"
 REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))
 PORT = int(os.getenv("PORT", 10000))
 SELF_PING_URL = os.getenv("SELF_PING_URL", None)
-ALPHAV_API_KEY = os.getenv("ALPHAV_API_KEY", "demo")
+ALPHAV_API_KEY = "XWZFB7RP8I4SWCMZ"  # ✅ Your provided AlphaVantage API key
 
 # ======================================================
 # === INDICATORS ===
