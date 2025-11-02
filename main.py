@@ -63,18 +63,19 @@ def compute_indicators(df):
 # === ALPHA VANTAGE FETCHERS ===
 # ======================================================
 def fetch_alpha_daily():
-    print("📥 Fetching daily XAU/USD data (Alpha Vantage)...")
+    print("📥 Fetching daily XAU/USD data (Alpha Vantage COMMODITY)...")
     url = (
-        f"https://www.alphavantage.co/query?function=FX_DAILY"
-        f"&from_symbol=XAU&to_symbol=USD&apikey={ALPHAV_API_KEY}&outputsize=full"
+        f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY"
+        f"&symbol=XAUUSD"
+        f"&apikey={ALPHAV_API_KEY}&outputsize=full"
     )
     try:
         r = requests.get(url, timeout=20)
-        data = r.json().get("Time Series FX (Daily)", {})
+        data = r.json().get("Time Series (Daily)", {})
         if not data:
             raise ValueError("Empty daily dataset from Alpha Vantage.")
         df = pd.DataFrame(data).T
-        df.columns = ["Open", "High", "Low", "Close"]
+        df.columns = ["Open", "High", "Low", "Close", "Volume"]
         df = df.astype(float)
         df["Date"] = pd.to_datetime(df.index)
         df.sort_values("Date", inplace=True)
@@ -88,20 +89,22 @@ def fetch_alpha_daily():
             return pd.read_csv(DAILY_FILE, parse_dates=["Date"])
         return pd.DataFrame()
 
+
 def fetch_alpha_hourly():
-    print("📥 Fetching hourly XAU/USD data (Alpha Vantage)...")
+    print("📥 Fetching hourly XAU/USD data (Alpha Vantage COMMODITY)...")
     url = (
-        f"https://www.alphavantage.co/query?function=FX_INTRADAY"
-        f"&from_symbol=XAU&to_symbol=USD&interval=60min"
+        f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY"
+        f"&symbol=XAUUSD"
+        f"&interval=60min"
         f"&apikey={ALPHAV_API_KEY}&outputsize=full"
     )
     try:
         r = requests.get(url, timeout=20)
-        data = r.json().get("Time Series FX (60min)", {})
+        data = r.json().get("Time Series (60min)", {})
         if not data:
             raise ValueError("Empty hourly dataset from Alpha Vantage.")
         df = pd.DataFrame(data).T
-        df.columns = ["Open", "High", "Low", "Close"]
+        df.columns = ["Open", "High", "Low", "Close", "Volume"]
         df = df.astype(float)
         df["Date"] = pd.to_datetime(df.index)
         df.sort_values("Date", inplace=True)
@@ -114,7 +117,6 @@ def fetch_alpha_hourly():
             print("⚠️ Using cached hourly data.")
             return pd.read_csv(HOURLY_FILE, parse_dates=["Date"])
         return pd.DataFrame()
-
 # ======================================================
 # === MODELING + SIGNALS ===
 # ======================================================
