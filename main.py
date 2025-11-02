@@ -21,7 +21,9 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DAILY_FILE = os.path.join(DATA_DIR, f"{SYMBOL}_daily.csv")
 HOURLY_FILE = os.path.join(DATA_DIR, f"{SYMBOL}_hourly.csv")
 
-REFRESH_INTERVAL = 900  # 15 minutes
+REFRESH_INTERVAL = 7200  # 2 hours (safe for Alpha Vantage free tier)
+print(f"⏱️ Refresh interval set to {REFRESH_INTERVAL // 60} minutes (Alpha Vantage safe limit).")
+
 
 app = Flask(__name__)
 
