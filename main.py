@@ -5,6 +5,7 @@ import time
 from flask import Flask, jsonify
 from datetime import datetime
 import pickle
+import threading
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 
@@ -12,28 +13,29 @@ from sklearn.ensemble import RandomForestClassifier
 # 🔧 CONFIGURATION
 # ======================================================
 ALPHAV_API_KEY = "XUU2PYO481XBYWR4"  # Your working Alpha Vantage key
+SYMBOL = "GLD"  # GLD ETF tracks Gold price closely
 
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-DAILY_FILE = os.path.join(DATA_DIR, "XAU_USD_Historical_Data_daily.csv")
-HOURLY_FILE = os.path.join(DATA_DIR, "XAU_USD_Historical_Data_hourly.csv")
+DAILY_FILE = os.path.join(DATA_DIR, f"{SYMBOL}_daily.csv")
+HOURLY_FILE = os.path.join(DATA_DIR, f"{SYMBOL}_hourly.csv")
+
+REFRESH_INTERVAL = 900  # 15 minutes
 
 app = Flask(__name__)
 
 # ======================================================
-# 🪙 Fetch Daily Data (Alpha Vantage FX_DAILY)
+# 🪙 Fetch Daily Data (Alpha Vantage TIME_SERIES_DAILY)
 # ======================================================
-
 def fetch_alpha_daily():
-    """Fetch daily XAU/USD data using Alpha Vantage FX_DAILY endpoint."""
-    print("📥 Fetching daily XAU/USD data (Alpha Vantage FX_DAILY)...")
+    """Fetch daily GLD data from Alpha Vantage (TIME_SERIES_DAILY)."""
+    print("📥 Fetching daily GLD data (Alpha Vantage TIME_SERIES_DAILY)...")
 
     url = "https://www.alphavantage.co/query"
     params = {
-        "function": "FX_DAILY",
-        "from_symbol": "XAU",
-        "to_symbol": "USD",
+        "function": "TIME_SERIES_DAILY",
+        "symbol": SYMBOL,
         "apikey": ALPHAV_API_KEY,
         "outputsize": "compact"
     }
@@ -42,15 +44,16 @@ def fetch_alpha_daily():
         r = requests.get(url, params=params, timeout=30)
         data = r.json()
 
-        if "Time Series FX (Daily)" not in data:
-            raise ValueError("Empty daily dataset from Alpha Vantage (FX_DAILY).")
+        if "Time Series (Daily)" not in data:
+            raise ValueError(f"Empty dataset from Alpha Vantage: {data}")
 
-        df = pd.DataFrame.from_dict(data["Time Series FX (Daily)"], orient="index")
+        df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient="index")
         df = df.rename(columns={
             "1. open": "open",
             "2. high": "high",
             "3. low": "low",
-            "4. close": "close"
+            "4. close": "close",
+            "5. volume": "volume"
         })
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
@@ -62,19 +65,18 @@ def fetch_alpha_daily():
         print(f"❌ AlphaVantage daily fetch error: {e}")
         return pd.DataFrame()
 
-# ======================================================
-# ⏰ Fetch Hourly Data (Alpha Vantage FX_INTRADAY)
-# ======================================================
 
+# ======================================================
+# ⏰ Fetch Hourly Data (Alpha Vantage TIME_SERIES_INTRADAY)
+# ======================================================
 def fetch_alpha_hourly():
-    """Fetch hourly XAU/USD data using Alpha Vantage FX_INTRADAY endpoint."""
-    print("📥 Fetching hourly XAU/USD data (Alpha Vantage FX_INTRADAY)...")
+    """Fetch hourly GLD data using Alpha Vantage TIME_SERIES_INTRADAY."""
+    print("📥 Fetching hourly GLD data (Alpha Vantage TIME_SERIES_INTRADAY)...")
 
     url = "https://www.alphavantage.co/query"
     params = {
-        "function": "FX_INTRADAY",
-        "from_symbol": "XAU",
-        "to_symbol": "USD",
+        "function": "TIME_SERIES_INTRADAY",
+        "symbol": SYMBOL,
         "interval": "60min",
         "apikey": ALPHAV_API_KEY,
         "outputsize": "compact"
@@ -84,15 +86,16 @@ def fetch_alpha_hourly():
         r = requests.get(url, params=params, timeout=30)
         data = r.json()
 
-        if "Time Series FX (60min)" not in data:
-            raise ValueError("Empty hourly dataset from Alpha Vantage (FX_INTRADAY).")
+        if "Time Series (60min)" not in data:
+            raise ValueError(f"Empty hourly dataset from Alpha Vantage: {data}")
 
-        df = pd.DataFrame.from_dict(data["Time Series FX (60min)"], orient="index")
+        df = pd.DataFrame.from_dict(data["Time Series (60min)"], orient="index")
         df = df.rename(columns={
             "1. open": "open",
             "2. high": "high",
             "3. low": "low",
-            "4. close": "close"
+            "4. close": "close",
+            "5. volume": "volume"
         })
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
@@ -104,10 +107,10 @@ def fetch_alpha_hourly():
         print(f"❌ AlphaVantage hourly fetch error: {e}")
         return pd.DataFrame()
 
+
 # ======================================================
 # 🤖 Train Model (Daily)
 # ======================================================
-
 def train_simple_model():
     """Train a simple RandomForest model using daily close prices."""
     if not os.path.exists(DAILY_FILE):
@@ -131,10 +134,28 @@ def train_simple_model():
     print(f"🤖 Model trained and saved → model_day.pkl (val acc={acc:.3f})")
     return model
 
+
+# ======================================================
+# 🔁 Background Data Loop
+# ======================================================
+def data_refresh_loop():
+    while True:
+        daily = fetch_alpha_daily()
+        hourly = fetch_alpha_hourly()
+        train_simple_model()
+
+        if not daily.empty:
+            print(f"[{datetime.utcnow()}] 📅 Daily Close: {daily['close'].iloc[-1]}")
+        if not hourly.empty:
+            print(f"[{datetime.utcnow()}] 🕐 Hourly Close: {hourly['close'].iloc[-1]}")
+
+        print("⏳ Waiting 15 minutes before refreshing data...\n")
+        time.sleep(REFRESH_INTERVAL)
+
+
 # ======================================================
 # 🌐 Flask Endpoints
 # ======================================================
-
 @app.route("/")
 def home():
     daily_df = pd.read_csv(DAILY_FILE) if os.path.exists(DAILY_FILE) else pd.DataFrame()
@@ -143,7 +164,7 @@ def home():
     response = {
         "daily_latest": daily_df.tail(1).to_dict(orient="records"),
         "hourly_latest": hourly_df.tail(1).to_dict(orient="records"),
-        "message": "✅ AlphaVantage FX data fetched successfully"
+        "message": "✅ AlphaVantage GLD (Gold proxy) data fetched successfully"
     }
     return jsonify(response)
 
@@ -166,23 +187,12 @@ def signal():
         "signal": signal
     })
 
-# ======================================================
-# 🚀 MAIN LOOP
-# ======================================================
 
+# ======================================================
+# 🚀 MAIN ENTRY POINT
+# ======================================================
 if __name__ == "__main__":
     print("🚀 Starting Flask on port 10000 | Refresh every 900s (AlphaVantage only)")
-
-    while True:
-        daily = fetch_alpha_daily()
-        hourly = fetch_alpha_hourly()
-        train_simple_model()
-
-        if not daily.empty:
-            print(f"[{datetime.utcnow()}] 📅 Daily Close: {daily['close'].iloc[-1]}")
-        if not hourly.empty:
-            print(f"[{datetime.utcnow()}] 🕐 Hourly Close: {hourly['close'].iloc[-1]}")
-
-        app.run(host="0.0.0.0", port=10000)
-        print("⏳ Waiting 15 minutes before refreshing data...")
-        time.sleep(900)
+    t = threading.Thread(target=data_refresh_loop, daemon=True)
+    t.start()
+    app.run(host="0.0.0.0", port=10000)
