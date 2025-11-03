@@ -1,4 +1,4 @@
-# main.py — XAU/USD AI Agent (AlphaVantage-only, 3-key rotation hardcoded)
+# main.py — XAU/USD AI Agent (AlphaVantage-only, 5-key rotation hardcoded)
 # This script assembles data, indicators, ensemble ML, fusion logic, SL/TP,
 # backtest simulation, Optuna hook (optional), and an RL stub (optional).
 # Hardcoded Alpha Vantage keys (as requested).
@@ -68,6 +68,9 @@ ALPHAV_API_KEYS = [
     "XWZFB7RP8I4SWCMZ",  # key A
     "XUU2PYO481XBYWR4",  # key B
     "94CMKYJJQUVN51AT",  # key C
+    "0DZCC9GW6YJBNUYP",  # key D
+    "I2SOZBI81ZWMY56L",  # key E
+    
 ]
 ALPHAV_API_KEY = random.choice(ALPHAV_API_KEYS)
 
