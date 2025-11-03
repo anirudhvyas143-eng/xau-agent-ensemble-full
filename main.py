@@ -1,5 +1,5 @@
-# main.py — XAU/USD AI Agent (AlphaVantage primary, Finnhub fallback)
-# Includes: 5-key AlphaVantage rotation (hardcoded), Finnhub fallback,
+# main.py — XAU/USD AI Agent 
+# Includes: 5-key AlphaVantage rotation (hardcoded), Finnhub fallback,twelvedata fallback
 # indicators, ensemble ML, fusion, SL/TP, backtest, Optuna, RL stub, Flask API.
 
 import os
@@ -183,9 +183,60 @@ def fetch_from_finnhub_symbol(symbol="GLD", resolution="D", count=2000):
     """
     # For safety, reuse FX fetch fallback; keep this as a stub.
     return pd.DataFrame()
+    # =========================================================
+# ✅ TwelveData fallback (final safety layer)
+# =========================================================
+from twelvedata import TDClient
+
+TWELVEDATA_KEY = "daf266a898fd450caed947b15cfba53e"
+
+def fetch_from_twelvedata(symbol="XAU/USD", interval="1min"):
+    """
+    Fetch latest XAU/USD price or candle using TwelveData SDK.
+    Triggered only if both AlphaVantage & Finnhub fail.
+    """
+    try:
+        td = TDClient(apikey=TWELVEDATA_KEY)
+
+        # Try latest price endpoint first
+        price_data = td.price(symbol=symbol).as_json()
+        if "price" in price_data:
+            price = float(price_data["price"])
+            print(f"✅ TwelveData (latest) → {price}")
+            df = pd.DataFrame([{
+                "Date": pd.Timestamp.utcnow(),
+                "Open": price,
+                "High": price,
+                "Low": price,
+                "Close": price,
+                "Volume": 0
+            }])
+            return df
+
+        # Fallback: use 1-min time series
+        ts = td.time_series(symbol=symbol, interval=interval, outputsize=1).as_json()
+        if isinstance(ts, list) and len(ts) > 0 and "close" in ts[0]:
+            close = float(ts[0]["close"])
+            print(f"✅ TwelveData (timeseries) → {close}")
+            df = pd.DataFrame([{
+                "Date": ts[0]["datetime"],
+                "Open": ts[0]["open"],
+                "High": ts[0]["high"],
+                "Low": ts[0]["low"],
+                "Close": ts[0]["close"],
+                "Volume": 0
+            }])
+            return df
+
+        print("⚠️ TwelveData returned unexpected format:", ts)
+    except Exception as e:
+        print("❌ TwelveData fetch error:", e)
+
+    print("🚫 TwelveData failed.")
+    return pd.DataFrame()
 
 # -----------------------
-# Data fetchers (AlphaVantage primary; Finnhub fallback)
+# Data fetchers (AlphaVantage primary; Finnhub fallback
 # -----------------------
 def fetch_fx_daily_xauusd():
     """Use FX_DAILY from AlphaVantage for XAU/USD (preferred)."""
@@ -275,12 +326,9 @@ def fetch_daily():
         df, data = fetch_symbol_daily_globaleq(SYMBOL_EQ)
     # If still empty and Finnhub available, try Finnhub daily (D)
     if df.empty:
-        print("⚠️ AlphaVantage empty for daily — trying Finnhub fallback...")
-        fh = fetch_from_finnhub_fx(symbol="OANDA:XAU_USD", resolution="D", count=4000)
-        if not fh.empty:
-            fh.to_csv(DAILY_FILE, index=False)
-            return fh
-    return df
+        if df.empty:
+    print("⚠️ AlphaVantage + Finnhub failed — trying TwelveData fallback.")
+    df = fetch_from_twelvedata()
 
 def fetch_hourly():
     """Try AlphaVantage FX intraday first; fallback to AlphaVantage symbol intraday; then Finnhub hourly."""
@@ -289,12 +337,9 @@ def fetch_hourly():
         df, data = fetch_symbol_intraday_globaleq(SYMBOL_EQ)
     # If still empty and Finnhub available, try Finnhub hourly ('60')
     if df.empty:
-        print("⚠️ AlphaVantage empty for hourly — trying Finnhub fallback...")
-        fh = fetch_from_finnhub_fx(symbol="OANDA:XAU_USD", resolution="60", count=500)
-        if not fh.empty:
-            fh.to_csv(HOURLY_FILE, index=False)
-            return fh
-    return df
+        if df.empty:
+    print("⚠️ AlphaVantage + Finnhub failed — trying TwelveData fallback.")
+    df = fetch_from_twelvedata()
 
 # -----------------------
 # Indicators & features
