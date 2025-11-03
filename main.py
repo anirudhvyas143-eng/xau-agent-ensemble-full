@@ -1,7 +1,6 @@
-# main.py — XAU/USD AI Agent (AlphaVantage-only, 5-key rotation hardcoded)
-# This script assembles data, indicators, ensemble ML, fusion logic, SL/TP,
-# backtest simulation, Optuna hook (optional), and an RL stub (optional).
-# Hardcoded Alpha Vantage keys (as requested).
+# main.py — XAU/USD AI Agent (AlphaVantage primary, Finnhub fallback)
+# Includes: 5-key AlphaVantage rotation (hardcoded), Finnhub fallback,
+# indicators, ensemble ML, fusion, SL/TP, backtest, Optuna, RL stub, Flask API.
 
 import os
 import time
@@ -47,6 +46,13 @@ try:
 except Exception:
     HAS_RL = False
 
+# Finnhub (fallback) - optional import, handled gracefully if not installed
+try:
+    import finnhub
+    HAS_FINNHUB = True
+except Exception:
+    HAS_FINNHUB = False
+
 from flask import Flask, jsonify, request
 
 # -----------------------
@@ -70,15 +76,19 @@ ALPHAV_API_KEYS = [
     "94CMKYJJQUVN51AT",  # key C
     "0DZCC9GW6YJBNUYP",  # key D
     "I2SOZBI81ZWMY56L",  # key E
-    
 ]
 ALPHAV_API_KEY = random.choice(ALPHAV_API_KEYS)
 
-# Symbol: prefer XAU for FX endpoints; fallback to GLD (ETF)
-SYMBOL_FX = ("XAU", "USD")  # as from_symbol,to_symbol for FX endpoints
-SYMBOL_EQ = "GLD"           # ETF fallback
+# === Finnhub fallback key (you provided this) ===
+# If you want to rotate or change, edit this value.
+FINNHUB_KEY = "d449o49r01qge0d1701gd449o49r01qge0d17020"
 
-REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 7200))  # default 2 hours
+# Symbol: prefer XAU for FX endpoints; fallback to GLD (ETF)
+# For AlphaVantage FX endpoints we use from_symbol/to_symbol.
+SYMBOL_FX = ("XAU", "USD")
+SYMBOL_EQ = "GLD"  # fallback ETF symbol
+
+REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))  # default 1 hour (you used 3600 in logs)
 PORT = int(os.getenv("PORT", 10000))
 
 # Feature flags / params
@@ -121,11 +131,65 @@ def try_alpha_request(params):
     return {}
 
 # -----------------------
-# Data fetchers (FX endpoints preferred; fallback to GLD TIME_SERIES)
+# Finnhub fallback helpers
+# -----------------------
+def fetch_from_finnhub_fx(symbol="OANDA:XAU_USD", resolution="D", count=2000):
+    """
+    Fetch candles from Finnhub for gold forex (OANDA:XAU_USD).
+    resolution: "1","5","15","30","60","D","W","M"
+    count: approximate number of bars to request (used to compute from timestamp)
+    """
+    if not HAS_FINNHUB:
+        print("⚠️ Finnhub library not available.")
+        return pd.DataFrame()
+    try:
+        client = finnhub.Client(api_key=FINNHUB_KEY)
+        now = int(time.time())
+        # resolution mapping: if resolution is 'D' use days, else treat as minutes/hours.
+        if resolution.upper() == "D":
+            # count days -> seconds
+            _from = now - count * 24 * 3600
+        elif resolution.upper() == "W":
+            _from = now - count * 7 * 24 * 3600
+        else:
+            # assume minutes/hours - use 3600 seconds per bar for hourly
+            # If resolution is '60' treat as hourly
+            step_seconds = 60 if resolution == "1" else (60 * int(resolution))
+            _from = now - count * step_seconds
+        res = client.forex_candles(symbol, resolution, _from, now)
+        if res and res.get("s") == "ok":
+            df = pd.DataFrame({
+                "Date": pd.to_datetime(res["t"], unit="s"),
+                "Open": res["o"],
+                "High": res["h"],
+                "Low": res["l"],
+                "Close": res["c"],
+                "Volume": res.get("v", [0] * len(res["t"]))
+            })
+            df = df.sort_values("Date").reset_index(drop=True)
+            print(f"✅ Finnhub FX fallback returned {len(df)} rows for {symbol} @ {resolution}")
+            return df
+        else:
+            print("⚠️ Finnhub FX returned no data or error:", res)
+            return pd.DataFrame()
+    except Exception as e:
+        print("❌ Finnhub FX fetch error:", e)
+        return pd.DataFrame()
+
+def fetch_from_finnhub_symbol(symbol="GLD", resolution="D", count=2000):
+    """
+    If Finnhub supports the ETF ticker in your plan, try that (less likely).
+    Here as a generic fallback — primarily use FX fetch above.
+    """
+    # For safety, reuse FX fetch fallback; keep this as a stub.
+    return pd.DataFrame()
+
+# -----------------------
+# Data fetchers (AlphaVantage primary; Finnhub fallback)
 # -----------------------
 def fetch_fx_daily_xauusd():
     """Use FX_DAILY from AlphaVantage for XAU/USD (preferred)."""
-    print("📥 Fetching XAU/USD daily via FX_DAILY...")
+    print("📥 Fetching XAU/USD daily via FX_DAILY (AlphaVantage)...")
     params = {
         "function": "FX_DAILY",
         "from_symbol": SYMBOL_FX[0],
@@ -146,8 +210,8 @@ def fetch_fx_daily_xauusd():
     return df, data
 
 def fetch_fx_intraday_xauusd():
-    """Use FX_INTRADAY for hourly XAU/USD."""
-    print("📥 Fetching XAU/USD hourly via FX_INTRADAY 60min...")
+    """Use FX_INTRADAY for hourly XAU/USD from AlphaVantage."""
+    print("📥 Fetching XAU/USD hourly via FX_INTRADAY 60min (AlphaVantage)...")
     params = {
         "function": "FX_INTRADAY",
         "from_symbol": SYMBOL_FX[0],
@@ -169,8 +233,8 @@ def fetch_fx_intraday_xauusd():
     return df, data
 
 def fetch_symbol_daily_globaleq(symbol=SYMBOL_EQ):
-    """Fallback: use TIME_SERIES_DAILY for GLD ETF (symbol-based)."""
-    print(f"📥 Fetching {symbol} daily via TIME_SERIES_DAILY (fallback)...")
+    """Fallback: use TIME_SERIES_DAILY for GLD ETF (AlphaVantage)."""
+    print(f"📥 Fetching {symbol} daily via TIME_SERIES_DAILY (AlphaVantage fallback)...")
     params = {"function":"TIME_SERIES_DAILY","symbol":symbol,"outputsize":"full"}
     data = try_alpha_request(params)
     if not data or "Time Series (Daily)" not in data:
@@ -187,8 +251,8 @@ def fetch_symbol_daily_globaleq(symbol=SYMBOL_EQ):
     return df, data
 
 def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
-    """Fallback: use TIME_SERIES_INTRADAY for GLD ETF hourly."""
-    print(f"📥 Fetching {symbol} hourly via TIME_SERIES_INTRADAY (fallback)...")
+    """Fallback: use TIME_SERIES_INTRADAY for GLD ETF hourly (AlphaVantage)."""
+    print(f"📥 Fetching {symbol} hourly via TIME_SERIES_INTRADAY (AlphaVantage fallback)...")
     params = {"function":"TIME_SERIES_INTRADAY","symbol":symbol,"interval":"60min","outputsize":"compact"}
     data = try_alpha_request(params)
     if not data or "Time Series (60min)" not in data:
@@ -205,17 +269,31 @@ def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
     return df, data
 
 def fetch_daily():
-    """Try FX daily first, fallback to GLD daily."""
+    """Try AlphaVantage FX daily first; fallback to AlphaVantage symbol; then Finnhub."""
     df, data = fetch_fx_daily_xauusd()
     if df.empty:
         df, data = fetch_symbol_daily_globaleq(SYMBOL_EQ)
+    # If still empty and Finnhub available, try Finnhub daily (D)
+    if df.empty:
+        print("⚠️ AlphaVantage empty for daily — trying Finnhub fallback...")
+        fh = fetch_from_finnhub_fx(symbol="OANDA:XAU_USD", resolution="D", count=4000)
+        if not fh.empty:
+            fh.to_csv(DAILY_FILE, index=False)
+            return fh
     return df
 
 def fetch_hourly():
-    """Try FX intraday first, fallback to GLD intraday."""
+    """Try AlphaVantage FX intraday first; fallback to AlphaVantage symbol intraday; then Finnhub hourly."""
     df, data = fetch_fx_intraday_xauusd()
     if df.empty:
         df, data = fetch_symbol_intraday_globaleq(SYMBOL_EQ)
+    # If still empty and Finnhub available, try Finnhub hourly ('60')
+    if df.empty:
+        print("⚠️ AlphaVantage empty for hourly — trying Finnhub fallback...")
+        fh = fetch_from_finnhub_fx(symbol="OANDA:XAU_USD", resolution="60", count=500)
+        if not fh.empty:
+            fh.to_csv(HOURLY_FILE, index=False)
+            return fh
     return df
 
 # -----------------------
@@ -490,7 +568,7 @@ def build_train_and_signal():
     if not hourly_df.empty:
         try:
             proc_h = compute_indicators(hourly_df.rename(columns={"Date":"Date","Open":"Open","High":"High","Low":"Low","Close":"Close","Volume":"Volume"}))
-            model_prob_h = ensemble_predict_proba(proc_h) or ensemble_predict_proba(proc) if not daily_df.empty else None
+            model_prob_h = ensemble_predict_proba(proc_h) or (ensemble_predict_proba(proc) if not daily_df.empty else None)
             fused_h = fuse_signal(model_prob_h, proc_h if not proc_h.empty else proc)
             sltp_h = calc_sl_tp(proc_h.iloc[-1] if not proc_h.empty else proc.iloc[-1], side=fused_h["signal"] if fused_h["signal"] in ("BUY","SELL") else "BUY")
             qty_h = position_size(sltp_h["entry"], sltp_h["sl"])
@@ -593,17 +671,28 @@ def home():
         "status": "ok",
         "time": datetime.now(timezone.utc).isoformat(),
         "active_api_key_tail": ALPHAV_API_KEY[-4:],
-        "note": "AlphaVantage-only, keys hardcoded."
+        "note": "AlphaVantage primary; Finnhub fallback (if available)."
     })
 
 @app.route("/signal")
 def signal_route():
+    """
+    Returns the latest signal JSON. Contains:
+      - daily: { signal, confidence, entry, sl, tp, qty, annotations }
+      - hourly: same
+    """
     if SIGNALS_FILE.exists():
         try:
             return jsonify(json.load(open(SIGNALS_FILE)))
         except Exception:
             pass
     return jsonify(build_train_and_signal())
+
+@app.route("/signal_url")
+def signal_url():
+    """Return the absolute URL to the /signal endpoint for linking from logs/dashboards."""
+    base = request.host_url.rstrip("/")
+    return jsonify({"signal_url": f"{base}/signal"})
 
 @app.route("/history")
 def history_route():
@@ -702,5 +791,5 @@ def background_loop():
 if __name__ == "__main__":
     t = threading.Thread(target=background_loop, daemon=True)
     t.start()
-    print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL_SECS}s (AlphaVantage keys rotated)")
+    print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL_SECS}s (AlphaVantage keys rotated, Finnhub fallback enabled)")
     app.run(host="0.0.0.0", port=PORT)
