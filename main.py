@@ -1,67 +1,32 @@
-# main.py — XAU/USD AI Agent 
-# Includes: 5-key AlphaVantage rotation (hardcoded), Finnhub fallback,twelvedata fallback
-# indicators, ensemble ML, fusion, SL/TP, backtest, Optuna, RL stub, Flask API.
+# main.py — XAU/USD AI Agent
+# Includes: 5-key AlphaVantage rotation (hardcoded) + TwelveData fallback
+# Indicators, ensemble ML, fusion, SL/TP, backtest, Optuna, RL stub, Flask API.
 
-import os
-import time
-import json
-import random
-import threading
-import math
+import os, time, json, random, threading, math
 from datetime import datetime, timezone
 from pathlib import Path
-
-import requests
-import pandas as pd
-import numpy as np
-import joblib
-
+import requests, pandas as pd, numpy as np, joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+from flask import Flask, jsonify, request
 
-# Optional libs
-try:
-    import lightgbm as lgb
-    HAS_LGB = True
-except Exception:
-    HAS_LGB = False
-
-try:
-    import optuna
-    HAS_OPTUNA = True
-except Exception:
-    HAS_OPTUNA = False
-
-try:
-    import backtrader as bt
-    HAS_BACKTRADER = True
-except Exception:
-    HAS_BACKTRADER = False
-
+# optional libs
+try: import lightgbm as lgb; HAS_LGB=True
+except: HAS_LGB=False
+try: import optuna; HAS_OPTUNA=True
+except: HAS_OPTUNA=False
+try: import backtrader as bt; HAS_BACKTRADER=True
+except: HAS_BACKTRADER=False
 try:
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import DummyVecEnv
     import gymnasium as gym
-    HAS_RL = True
-except Exception:
-    HAS_RL = False
+    HAS_RL=True
+except: HAS_RL=False
 
-# Finnhub (fallback) - optional import, handled gracefully if not installed
-try:
-    import finnhub
-    HAS_FINNHUB = True
-except Exception:
-    HAS_FINNHUB = False
-
-from flask import Flask, jsonify, request
-
-# -----------------------
-# CONFIG & FILES
-# -----------------------
+# ---------------- CONFIG ----------------
 ROOT = Path(".").resolve()
-DATA_DIR = ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
-
+DATA_DIR = ROOT / "data"; DATA_DIR.mkdir(exist_ok=True)
 DAILY_FILE = DATA_DIR / "XAU_USD_Historical_Data_daily.csv"
 HOURLY_FILE = DATA_DIR / "XAU_USD_Historical_Data_hourly.csv"
 MODEL_PATH = ROOT / "ensemble_model.pkl"
@@ -69,45 +34,34 @@ SCALER_PATH = ROOT / "ensemble_scaler.pkl"
 SIGNALS_FILE = ROOT / "signals.json"
 HISTORY_FILE = ROOT / "signals_history.json"
 
-# === Hardcoded AlphaVantage API keys (exact values you gave) ===
 ALPHAV_API_KEYS = [
-    "XWZFB7RP8I4SWCMZ",  # key A
-    "XUU2PYO481XBYWR4",  # key B
-    "94CMKYJJQUVN51AT",  # key C
-    "0DZCC9GW6YJBNUYP",  # key D
-    "I2SOZBI81ZWMY56L",  # key E
+    "XWZFB7RP8I4SWCMZ",
+    "XUU2PYO481XBYWR4",
+    "94CMKYJJQUVN51AT",
+    "0DZCC9GW6YJBNUYP",
+    "I2SOZBI81ZWMY56L",
 ]
 ALPHAV_API_KEY = random.choice(ALPHAV_API_KEYS)
 
-# === Finnhub fallback key (you provided this) ===
-# If you want to rotate or change, edit this value.
-FINNHUB_KEY = "d449o49r01qge0d1701gd449o49r01qge0d17020"
+# TwelveData key
+from twelvedata import TDClient
+TWELVEDATA_KEY = "daf266a898fd450caed947b15cfba53e"
 
-# Symbol: prefer XAU for FX endpoints; fallback to GLD (ETF)
-# For AlphaVantage FX endpoints we use from_symbol/to_symbol.
 SYMBOL_FX = ("XAU", "USD")
-SYMBOL_EQ = "GLD"  # fallback ETF symbol
+SYMBOL_EQ = "GLD"
 
-REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))  # default 1 hour (you used 3600 in logs)
+REFRESH_INTERVAL_SECS = int(os.getenv("REFRESH_INTERVAL_SECS", 3600))
 PORT = int(os.getenv("PORT", 10000))
-
-# Feature flags / params
 VP_BINS = int(os.getenv("VP_BINS", 24))
 FVG_LOOKBACK = int(os.getenv("FVG_LOOKBACK", 3))
 CONFIRMATION_CANDLES = int(os.getenv("CONFIRMATION_CANDLES", 1))
-CONFIRMATION_TYPE = os.getenv("CONFIRMATION_TYPE", "trend")  # "trend" or "close_above"
-
-# Risk sizing
+CONFIRMATION_TYPE = os.getenv("CONFIRMATION_TYPE", "trend")
 ACCOUNT_SIZE = float(os.getenv("ACCOUNT_SIZE", 100000.0))
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.01))  # 1% default
-SLIPPAGE_BPS = float(os.getenv("SLIPPAGE_BPS", 0.0005))   # 5 bps default
+RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.01))
+SLIPPAGE_BPS = float(os.getenv("SLIPPAGE_BPS", 0.0005))
 
-# -----------------------
-# Helper: AlphaVantage request with rotation
-# -----------------------
+# ---------------- AlphaVantage rotation ----------------
 def try_alpha_request(params):
-    """Call AlphaVantage rotating through provided keys. Return JSON or {}."""
-    global ALPHAV_API_KEY
     base = "https://www.alphavantage.co/query"
     for key in ALPHAV_API_KEYS:
         params["apikey"] = key
@@ -115,231 +69,102 @@ def try_alpha_request(params):
             r = requests.get(base, params=params, timeout=25)
             data = r.json()
         except Exception as e:
-            print(f"⚠️ Network/error with key ...{key[-4:]}: {e}")
+            print(f"⚠️ AlphaVantage error {key[-4:]}: {e}")
             continue
-
         msg = json.dumps(data).lower()
-        # detect "info" or limit messages
-        if "rate limit" in msg or "thank you for using alpha vantage" in msg or "invalid api call" in msg or "note" in msg:
-            print(f"⚠️ Key ending ...{key[-4:]} returned info/limit message; rotating.")
+        if any(k in msg for k in ["rate limit", "thank you", "invalid", "note"]):
+            print(f"⚠️ Key ...{key[-4:]} hit limit.")
             continue
-
-        ALPHAV_API_KEY = key
-        print(f"✅ Using AlphaVantage key ending ...{key[-4:]}")
+        print(f"✅ Using AlphaVantage key ...{key[-4:]}")
         return data
-    print("❌ All AlphaVantage keys exhausted or returned limit/info message.")
+    print("❌ All AlphaVantage keys exhausted.")
     return {}
 
-# -----------------------
-# Finnhub fallback helpers
-# -----------------------
-def fetch_from_finnhub_fx(symbol="OANDA:XAU_USD", resolution="D", count=2000):
-    """
-    Fetch candles from Finnhub for gold forex (OANDA:XAU_USD).
-    resolution: "1","5","15","30","60","D","W","M"
-    count: approximate number of bars to request (used to compute from timestamp)
-    """
-    if not HAS_FINNHUB:
-        print("⚠️ Finnhub library not available.")
-        return pd.DataFrame()
-    try:
-        client = finnhub.Client(api_key=FINNHUB_KEY)
-        now = int(time.time())
-        # resolution mapping: if resolution is 'D' use days, else treat as minutes/hours.
-        if resolution.upper() == "D":
-            # count days -> seconds
-            _from = now - count * 24 * 3600
-        elif resolution.upper() == "W":
-            _from = now - count * 7 * 24 * 3600
-        else:
-            # assume minutes/hours - use 3600 seconds per bar for hourly
-            # If resolution is '60' treat as hourly
-            step_seconds = 60 if resolution == "1" else (60 * int(resolution))
-            _from = now - count * step_seconds
-        res = client.forex_candles(symbol, resolution, _from, now)
-        if res and res.get("s") == "ok":
-            df = pd.DataFrame({
-                "Date": pd.to_datetime(res["t"], unit="s"),
-                "Open": res["o"],
-                "High": res["h"],
-                "Low": res["l"],
-                "Close": res["c"],
-                "Volume": res.get("v", [0] * len(res["t"]))
-            })
-            df = df.sort_values("Date").reset_index(drop=True)
-            print(f"✅ Finnhub FX fallback returned {len(df)} rows for {symbol} @ {resolution}")
-            return df
-        else:
-            print("⚠️ Finnhub FX returned no data or error:", res)
-            return pd.DataFrame()
-    except Exception as e:
-        print("❌ Finnhub FX fetch error:", e)
-        return pd.DataFrame()
-
-def fetch_from_finnhub_symbol(symbol="GLD", resolution="D", count=2000):
-    """
-    If Finnhub supports the ETF ticker in your plan, try that (less likely).
-    Here as a generic fallback — primarily use FX fetch above.
-    """
-    # For safety, reuse FX fetch fallback; keep this as a stub.
-    return pd.DataFrame()
-    # =========================================================
-# ✅ TwelveData fallback (final safety layer)
-# =========================================================
-from twelvedata import TDClient
-
-TWELVEDATA_KEY = "daf266a898fd450caed947b15cfba53e"
-
-def fetch_from_twelvedata(symbol="XAU/USD", interval="1min"):
-    """
-    Fetch latest XAU/USD price or candle using TwelveData SDK.
-    Triggered only if both AlphaVantage & Finnhub fail.
-    """
+# ---------------- TwelveData fallback ----------------
+def fetch_from_twelvedata(symbol="XAU/USD", interval="1h"):
     try:
         td = TDClient(apikey=TWELVEDATA_KEY)
-
-        # Try latest price endpoint first
-        price_data = td.price(symbol=symbol).as_json()
-        if "price" in price_data:
-            price = float(price_data["price"])
-            print(f"✅ TwelveData (latest) → {price}")
-            df = pd.DataFrame([{
-                "Date": pd.Timestamp.utcnow(),
-                "Open": price,
-                "High": price,
-                "Low": price,
-                "Close": price,
-                "Volume": 0
-            }])
+        ts = td.time_series(symbol=symbol, interval=interval, outputsize=100).as_json()
+        if isinstance(ts, list) and len(ts) > 0:
+            df = pd.DataFrame(ts)
+            for c in ["open","high","low","close"]: df[c]=pd.to_numeric(df[c])
+            df["datetime"]=pd.to_datetime(df["datetime"])
+            df.rename(columns={"datetime":"Date","open":"Open","high":"High","low":"Low","close":"Close"}, inplace=True)
+            df["Volume"]=0
+            df=df.sort_values("Date").reset_index(drop=True)
+            print(f"✅ TwelveData returned {len(df)} rows.")
             return df
-
-        # Fallback: use 1-min time series
-        ts = td.time_series(symbol=symbol, interval=interval, outputsize=1).as_json()
-        if isinstance(ts, list) and len(ts) > 0 and "close" in ts[0]:
-            close = float(ts[0]["close"])
-            print(f"✅ TwelveData (timeseries) → {close}")
-            df = pd.DataFrame([{
-                "Date": ts[0]["datetime"],
-                "Open": ts[0]["open"],
-                "High": ts[0]["high"],
-                "Low": ts[0]["low"],
-                "Close": ts[0]["close"],
-                "Volume": 0
-            }])
-            return df
-
-        print("⚠️ TwelveData returned unexpected format:", ts)
     except Exception as e:
         print("❌ TwelveData fetch error:", e)
-
-    print("🚫 TwelveData failed.")
     return pd.DataFrame()
 
-# -----------------------
-# Data fetchers (AlphaVantage primary; Finnhub fallback
-# -----------------------
+# ---------------- Data fetchers ----------------
 def fetch_fx_daily_xauusd():
-    """Use FX_DAILY from AlphaVantage for XAU/USD (preferred)."""
     print("📥 Fetching XAU/USD daily via FX_DAILY (AlphaVantage)...")
-    params = {
-        "function": "FX_DAILY",
-        "from_symbol": SYMBOL_FX[0],
-        "to_symbol": SYMBOL_FX[1],
-        "outputsize": "full",
-    }
+    params = {"function":"FX_DAILY","from_symbol":SYMBOL_FX[0],"to_symbol":SYMBOL_FX[1],"outputsize":"full"}
     data = try_alpha_request(params)
-    if not data or "Time Series FX (Daily)" not in data:
-        return pd.DataFrame(), data
+    if not data or "Time Series FX (Daily)" not in data: return pd.DataFrame(), data
     df = pd.DataFrame.from_dict(data["Time Series FX (Daily)"], orient="index")
-    df = df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close"})
-    df.index.name = "Date"
-    df = df.reset_index()
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
-    df.to_csv(DAILY_FILE, index=False)
-    print(f"✅ Saved FX daily → {DAILY_FILE} ({len(df)} rows)")
+    df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close"}, inplace=True)
+    df.index.name="Date"; df=df.reset_index(); df["Date"]=pd.to_datetime(df["Date"])
+    df=df.sort_values("Date"); df.to_csv(DAILY_FILE, index=False)
+    print(f"✅ Saved FX daily ({len(df)})")
     return df, data
 
 def fetch_fx_intraday_xauusd():
-    """Use FX_INTRADAY for hourly XAU/USD from AlphaVantage."""
-    print("📥 Fetching XAU/USD hourly via FX_INTRADAY 60min (AlphaVantage)...")
-    params = {
-        "function": "FX_INTRADAY",
-        "from_symbol": SYMBOL_FX[0],
-        "to_symbol": SYMBOL_FX[1],
-        "interval": "60min",
-        "outputsize": "compact",
-    }
-    data = try_alpha_request(params)
-    if not data or "Time Series FX (60min)" not in data:
-        return pd.DataFrame(), data
-    df = pd.DataFrame.from_dict(data["Time Series FX (60min)"], orient="index")
-    df = df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close"})
-    df.index.name = "Date"
-    df = df.reset_index()
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
-    df.to_csv(HOURLY_FILE, index=False)
-    print(f"✅ Saved FX hourly → {HOURLY_FILE} ({len(df)} rows)")
+    print("📥 Fetching XAU/USD hourly via FX_INTRADAY 60min...")
+    params={"function":"FX_INTRADAY","from_symbol":SYMBOL_FX[0],"to_symbol":SYMBOL_FX[1],"interval":"60min","outputsize":"compact"}
+    data=try_alpha_request(params)
+    if not data or "Time Series FX (60min)" not in data: return pd.DataFrame(), data
+    df=pd.DataFrame.from_dict(data["Time Series FX (60min)"], orient="index")
+    df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close"}, inplace=True)
+    df.index.name="Date"; df=df.reset_index(); df["Date"]=pd.to_datetime(df["Date"])
+    df=df.sort_values("Date"); df.to_csv(HOURLY_FILE, index=False)
+    print(f"✅ Saved FX hourly ({len(df)})")
     return df, data
 
 def fetch_symbol_daily_globaleq(symbol=SYMBOL_EQ):
-    """Fallback: use TIME_SERIES_DAILY for GLD ETF (AlphaVantage)."""
-    print(f"📥 Fetching {symbol} daily via TIME_SERIES_DAILY (AlphaVantage fallback)...")
-    params = {"function":"TIME_SERIES_DAILY","symbol":symbol,"outputsize":"full"}
-    data = try_alpha_request(params)
-    if not data or "Time Series (Daily)" not in data:
-        return pd.DataFrame(), data
-    df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient="index")
-    df = df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close","5. volume":"Volume"})
-    df.index.name="Date"
-    df = df.reset_index()
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
-    fn = DAILY_FILE.parent / f"{symbol}_daily.csv"
-    df.to_csv(fn, index=False)
-    print(f"✅ Saved fallback daily → {fn} ({len(df)} rows)")
+    print(f"📥 Fetching {symbol} daily via TIME_SERIES_DAILY...")
+    params={"function":"TIME_SERIES_DAILY","symbol":symbol,"outputsize":"full"}
+    data=try_alpha_request(params)
+    if not data or "Time Series (Daily)" not in data: return pd.DataFrame(), data
+    df=pd.DataFrame.from_dict(data["Time Series (Daily)"], orient="index")
+    df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close","5. volume":"Volume"}, inplace=True)
+    df.index.name="Date"; df=df.reset_index(); df["Date"]=pd.to_datetime(df["Date"])
+    df=df.sort_values("Date")
+    fn=DAILY_FILE.parent/f"{symbol}_daily.csv"; df.to_csv(fn,index=False)
+    print(f"✅ Saved fallback daily → {fn} ({len(df)})")
     return df, data
 
 def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
-    """Fallback: use TIME_SERIES_INTRADAY for GLD ETF hourly (AlphaVantage)."""
-    print(f"📥 Fetching {symbol} hourly via TIME_SERIES_INTRADAY (AlphaVantage fallback)...")
-    params = {"function":"TIME_SERIES_INTRADAY","symbol":symbol,"interval":"60min","outputsize":"compact"}
-    data = try_alpha_request(params)
-    if not data or "Time Series (60min)" not in data:
-        return pd.DataFrame(), data
-    df = pd.DataFrame.from_dict(data["Time Series (60min)"], orient="index")
-    df = df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close","5. volume":"Volume"})
-    df.index.name="Date"
-    df = df.reset_index()
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
-    fn = HOURLY_FILE.parent / f"{symbol}_hourly.csv"
-    df.to_csv(fn, index=False)
-    print(f"✅ Saved fallback hourly → {fn} ({len(df)} rows)")
+    print(f"📥 Fetching {symbol} hourly via TIME_SERIES_INTRADAY...")
+    params={"function":"TIME_SERIES_INTRADAY","symbol":symbol,"interval":"60min","outputsize":"compact"}
+    data=try_alpha_request(params)
+    if not data or "Time Series (60min)" not in data: return pd.DataFrame(), data
+    df=pd.DataFrame.from_dict(data["Time Series (60min)"], orient="index")
+    df.rename(columns={"1. open":"Open","2. high":"High","3. low":"Low","4. close":"Close","5. volume":"Volume"}, inplace=True)
+    df.index.name="Date"; df=df.reset_index(); df["Date"]=pd.to_datetime(df["Date"])
+    df=df.sort_values("Date")
+    fn=HOURLY_FILE.parent/f"{symbol}_hourly.csv"; df.to_csv(fn,index=False)
+    print(f"✅ Saved fallback hourly → {fn} ({len(df)})")
     return df, data
 
 def fetch_daily():
-    """Try AlphaVantage FX daily first; fallback to AlphaVantage symbol; then Finnhub."""
-    df, data = fetch_fx_daily_xauusd()
+    df,_=fetch_fx_daily_xauusd()
+    if df.empty: df,_=fetch_symbol_daily_globaleq(SYMBOL_EQ)
     if df.empty:
-        df, data = fetch_symbol_daily_globaleq(SYMBOL_EQ)
-    # If still empty and Finnhub available, try Finnhub daily (D)
-    if df.empty:
-        if df.empty:
-    print("⚠️ AlphaVantage + Finnhub failed — trying TwelveData fallback.")
-    df = fetch_from_twelvedata()
+        print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
+        df=fetch_from_twelvedata()
+    return df
 
 def fetch_hourly():
-    """Try AlphaVantage FX intraday first; fallback to AlphaVantage symbol intraday; then Finnhub hourly."""
-    df, data = fetch_fx_intraday_xauusd()
+    df,_=fetch_fx_intraday_xauusd()
+    if df.empty: df,_=fetch_symbol_intraday_globaleq(SYMBOL_EQ)
     if df.empty:
-        df, data = fetch_symbol_intraday_globaleq(SYMBOL_EQ)
-    # If still empty and Finnhub available, try Finnhub hourly ('60')
-    if df.empty:
-        if df.empty:
-    print("⚠️ AlphaVantage + Finnhub failed — trying TwelveData fallback.")
-    df = fetch_from_twelvedata()
+        print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
+        df=fetch_from_twelvedata(interval="1h")
+        return df
+    
 
 # -----------------------
 # Indicators & features
