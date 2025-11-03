@@ -24,11 +24,14 @@ services:
     envVars:
       - key: PORT
         value: 10000
+
+      # 3 hours = 10800 seconds (so 8 API calls per 24 hours)
       - key: REFRESH_INTERVAL_SECS
-        value: 3600
+        value: 10800
+
       - key: ALPHAV_API_KEY
-        sync: false      # set real key in Render dashboard
-      - key: RAPID_API_KEY
-        sync: false      # optional for Investing.com
+        sync: false      # set your real AlphaVantage key(s) in code or dashboard
+      - key: TWELVEDATA_API_KEY
+        sync: false      # set Twelve Data key here
       - key: SELF_PING_URL
         value: https://xauusd-ai-trader.onrender.com/signal
