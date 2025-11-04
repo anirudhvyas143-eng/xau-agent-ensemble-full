@@ -581,9 +581,6 @@ def simulate_backtest(df, entry_side="BUY", entry_index=None, sl=None, tp=None, 
     pnl = (last_price - entry_price) * qty if entry_side == "BUY" else (entry_price - last_price) * qty
     return {"pnl": pnl, "exit_price": last_price, "index": len(df)-1, "reason": "HOLD"}
 
-# -----------------------
-# Build, train, and signal generator
-# -----------------------
 def build_train_and_signal():
     print("📊 Running build_train_and_signal() refresh...")
 
@@ -610,7 +607,7 @@ def build_train_and_signal():
         print("❌ Hourly data fetch error:", e)
         hourly_df = pd.DataFrame()
 
-    # === SIGNAL GENERATION PIPELINE ===
+    # === INITIAL OUTPUTS ===
     day_out = {"signal": "N/A", "confidence": 0}
     hr_out = {"signal": "N/A", "confidence": 0}
 
@@ -619,59 +616,41 @@ def build_train_and_signal():
         try:
             daily_df.rename(columns=lambda x: x.capitalize(), inplace=True)
             proc = compute_indicators(daily_df)
-            
-            # Retrain every 3 days if model is older
+            # Retrain every 3 days
             if not MODEL_PATH.exists() or (time.time() - MODEL_PATH.stat().st_mtime) > 86400 * 3:
                 print("🧠 Retraining ensemble model (daily)...")
                 train_ensemble(daily_df)
-
-            model_prob = ensemble_predict_proba(proc)
-            fused = fuse_signal(model_prob, proc)
-            sltp = calc_sl_tp(proc.iloc[-1], side=fused["signal"] if fused["signal"] in ("BUY", "SELL") else "BUY")
-            qty = position_size(sltp["entry"], sltp["sl"])
-            day_out = {**fused, **sltp, "qty": qty}
+            prob = ensemble_predict_proba(proc)
+            fused = fuse_signal(prob, proc)
+            fused["timeframe"] = "daily"
+            day_out = fused
+            print(f"📈 DAILY signal: {day_out}")
         except Exception as e:
-            print("⚠️ Daily pipeline error:", e)
+            print("❌ Daily signal error:", e)
 
     # === HOURLY MODEL PIPELINE ===
     if not hourly_df.empty:
         try:
             hourly_df.rename(columns=lambda x: x.capitalize(), inplace=True)
             proc_h = compute_indicators(hourly_df)
-            model_prob_h = ensemble_predict_proba(proc_h)
-            fused_h = fuse_signal(model_prob_h, proc_h)
-            sltp_h = calc_sl_tp(proc_h.iloc[-1], side=fused_h["signal"] if fused_h["signal"] in ("BUY", "SELL") else "BUY")
-            qty_h = position_size(sltp_h["entry"], sltp_h["sl"])
-            hr_out = {**fused_h, **sltp_h, "qty": qty_h}
+            prob_h = ensemble_predict_proba(proc_h)
+            fused_h = fuse_signal(prob_h, proc_h)
+            fused_h["timeframe"] = "hourly"
+            hr_out = fused_h
+            print(f"⏱ HOURLY signal: {hr_out}")
         except Exception as e:
-            print("⚠️ Hourly pipeline error:", e)
+            print("❌ Hourly signal error:", e)
 
-    # === COMBINE OUTPUTS ===
-    combined = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "daily": day_out,
-        "hourly": hr_out
-    }
+    # === SAVE & RETURN SIGNALS ===
+    result = {"daily": day_out, "hourly": hr_out, "time": datetime.utcnow().isoformat()}
+    try:
+        with open(SIGNALS_FILE, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"✅ Signals saved → {SIGNALS_FILE}")
+    except Exception as e:
+        print("❌ Failed to save signals:", e)
 
-    # Save latest signal file
-    with open(SIGNALS_FILE, "w") as f:
-        json.dump(combined, f, indent=2)
-
-    # Update signal history
-    history = []
-    if HISTORY_FILE.exists():
-        try:
-            history = json.load(open(HISTORY_FILE))
-        except Exception:
-            history = []
-    history.append(combined)
-    json.dump(history[-200:], open(HISTORY_FILE, "w"), indent=2)
-
-    print(f"[{combined['timestamp']}] Hourly:{hr_out['signal']} ({hr_out.get('confidence', 0)}%) | "
-          f"Daily:{day_out['signal']} ({day_out.get('confidence', 0)}%)")
-
-    return combined
-
+    return result
 # -----------------------
 # Flask routes
 # -----------------------
