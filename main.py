@@ -760,16 +760,15 @@ def backtest_route():
     return jsonify({"trades": len(arr), "total_pnl": float(arr.sum()), "avg_pnl": float(arr.mean()), "winrate": float((arr>0).sum()/len(arr))})
 
 # -----------------------
-# Background refresh (thread)
+# Background refresh (run once)
 # -----------------------
 def background_loop():
-    while True:
-        try:
-            build_train_and_signal()
-        except Exception as e:
-            print("Background loop error:", e)
-        time.sleep(REFRESH_INTERVAL)
-
+    try:
+        print("🚀 Running one-time build and signal generation...")
+        build_train_and_signal()
+        print("✅ Signal generation complete — check /signal endpoint.")
+    except Exception as e:
+        print("Background loop error:", e)
 # -----------------------
 # Start server
 # -----------------------
@@ -798,9 +797,8 @@ if __name__ == "__main__":
             print("❌ TwelveData fetch error:", e)
 
     print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL} seconds (AlphaVantage + TwelveData enabled)")
-
-    # start background thread to refresh signals on the REFRESH_INTERVAL
-    t = threading.Thread(target=background_loop, daemon=True)
-    t.start()
+    
+  t = threading.Thread(target=background_loop, daemon=True)
+t.start()
 
     app.run(host="0.0.0.0", port=PORT)
