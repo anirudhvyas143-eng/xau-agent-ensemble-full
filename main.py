@@ -50,7 +50,7 @@ TWELVEDATA_KEY = "daf266a898fd450caed947b15cfba53e"
 SYMBOL_FX = ("XAU", "USD")
 SYMBOL_EQ = "GLD"
 
-REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL_SECS", 86400))
+REFRESH_INTERVAL = 7 * 24 * 60 * 60  # 1 week in seconds (604800)
 PORT = int(os.getenv("PORT", 10000))
 VP_BINS = int(os.getenv("VP_BINS", 24))
 FVG_LOOKBACK = int(os.getenv("FVG_LOOKBACK", 3))
