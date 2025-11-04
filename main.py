@@ -290,6 +290,53 @@ def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
     df = df.sort_values("datetime")
     print(f"🎯 Final merged dataset: {len(df)} rows of {interval} XAU/USD data.")
     return df
+  # ---------------------------------------------------------------------------------
+# Extended TwelveData Daily Fetcher (fetches up to 100,000 XAU/USD daily candles)
+# ---------------------------------------------------------------------------------
+def fetch_twelvedata_xauusd_daily(api_key, total_records=100000):
+    """
+    Fetch extended XAU/USD daily data from TwelveData beyond 5000-record limit.
+    """
+    print(f"📡 Fetching up to {total_records} rows of DAILY data from TwelveData...")
+
+    base_url = "https://api.twelvedata.com/time_series"
+    end_date = datetime.utcnow()
+    all_data = []
+
+    # Each request = 5000 rows max → each batch ~5000 days
+    step_days = 5000  
+
+    while len(all_data) < total_records:
+        start_date = end_date - timedelta(days=step_days)
+        params = {
+            "symbol": "XAU/USD",
+            "interval": "1day",
+            "apikey": api_key,
+            "outputsize": 5000,
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
+        }
+
+        response = requests.get(base_url, params=params)
+        data = response.json().get("values", [])
+        if not data:
+            print("⚠️ No more data available or API limit reached.")
+            break
+
+        all_data.extend(data)
+        end_date = start_date
+        print(f"✅ Collected {len(all_data)} rows so far...")
+        time.sleep(8)  # ⏳ safe delay for free plan
+
+    df = pd.DataFrame(all_data)
+    if not df.empty:
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        df = df.sort_values("datetime")
+        print(f"🎯 Final merged dataset: {len(df)} DAILY candles of XAU/USD.")
+    else:
+        print("⚠️ No data received from TwelveData.")
+
+    return df
 # -----------------------
 # Indicators & features
 # -----------------------
@@ -674,6 +721,7 @@ if __name__ == "__main__":
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
         try:
+           td_df = fetch_twelvedata_xauusd_hourly(api_key=TWELVEDATA_KEY, total_records=100000)
            td_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
             if not td_df.empty:
                 print(f"✅ TwelveData fallback succeeded with {len(td_df)} rows.")
