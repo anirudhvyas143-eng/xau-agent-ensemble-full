@@ -581,43 +581,98 @@ def simulate_backtest(df, entry_side="BUY", entry_index=None, sl=None, tp=None, 
     pnl = (last_price - entry_price) * qty if entry_side == "BUY" else (entry_price - last_price) * qty
     return {"pnl": pnl, "exit_price": last_price, "index": len(df)-1, "reason": "HOLD"}
 
+# -----------------------
+# Build, train, and signal generator
+# -----------------------
 def build_train_and_signal():
-    daily_df = fetch_daily()
-    hourly_df = fetch_hourly()
-    day_out = {"signal":"N/A","confidence":0}
-    hr_out = {"signal":"N/A","confidence":0}
+    print("📊 Running build_train_and_signal() refresh...")
+
+    # === DAILY DATA FETCH ===
+    try:
+        daily_df, _ = fetch_fx_daily_xauusd()
+        if daily_df.empty:
+            print("⚠️ AlphaVantage DAILY failed — trying TwelveData fallback.")
+            daily_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
+        else:
+            print(f"✅ DAILY data loaded from AlphaVantage: {len(daily_df)} rows")
+    except Exception as e:
+        print("❌ Daily data fetch error:", e)
+        daily_df = pd.DataFrame()
+
+    # === HOURLY DATA FETCH ===
+    try:
+        hourly_df = fetch_twelvedata_xauusd_hourly(api_key=TWELVEDATA_KEY, total_records=100000)
+        if hourly_df.empty:
+            print("⚠️ Hourly TwelveData returned no data.")
+        else:
+            print(f"✅ HOURLY data loaded: {len(hourly_df)} rows")
+    except Exception as e:
+        print("❌ Hourly data fetch error:", e)
+        hourly_df = pd.DataFrame()
+
+    # === SIGNAL GENERATION PIPELINE ===
+    day_out = {"signal": "N/A", "confidence": 0}
+    hr_out = {"signal": "N/A", "confidence": 0}
+
+    # === DAILY MODEL PIPELINE ===
     if not daily_df.empty:
         try:
-            proc = compute_indicators(daily_df.rename(columns={"Date":"Date","Open":"Open","High":"High","Low":"Low","Close":"Close","Volume":"Volume"}))
-            if not MODEL_PATH.exists() or (time.time() - MODEL_PATH.stat().st_mtime) > 86400*3:
+            proc = compute_indicators(daily_df.rename(columns={
+                "Date": "Date", "Open": "Open", "High": "High",
+                "Low": "Low", "Close": "Close", "Volume": "Volume"
+            }))
+            # Retrain every 3 days if model is older
+            if not MODEL_PATH.exists() or (time.time() - MODEL_PATH.stat().st_mtime) > 86400 * 3:
+                print("🧠 Retraining ensemble model (daily)...")
                 train_ensemble(daily_df)
+
             model_prob = ensemble_predict_proba(proc)
             fused = fuse_signal(model_prob, proc)
-            sltp = calc_sl_tp(proc.iloc[-1], side=fused["signal"] if fused["signal"] in ("BUY","SELL") else "BUY")
+            sltp = calc_sl_tp(proc.iloc[-1], side=fused["signal"] if fused["signal"] in ("BUY", "SELL") else "BUY")
             qty = position_size(sltp["entry"], sltp["sl"])
             day_out = {**fused, **sltp, "qty": qty}
         except Exception as e:
-            print("⚠️ Day pipeline error:", e)
+            print("⚠️ Daily pipeline error:", e)
+
+    # === HOURLY MODEL PIPELINE ===
     if not hourly_df.empty:
         try:
-            proc_h = compute_indicators(hourly_df.rename(columns={"Date":"Date","Open":"Open","High":"High","Low":"Low","Close":"Close","Volume":"Volume"}))
-            model_prob_h = ensemble_predict_proba(proc_h) or (ensemble_predict_proba(proc) if not daily_df.empty else None)
-            fused_h = fuse_signal(model_prob_h, proc_h if not proc_h.empty else proc)
-            sltp_h = calc_sl_tp(proc_h.iloc[-1] if not proc_h.empty else proc.iloc[-1], side=fused_h["signal"] if fused_h["signal"] in ("BUY","SELL") else "BUY")
+            proc_h = compute_indicators(hourly_df.rename(columns={
+                "Date": "Date", "Open": "Open", "High": "High",
+                "Low": "Low", "Close": "Close", "Volume": "Volume"
+            }))
+            model_prob_h = ensemble_predict_proba(proc_h)
+            fused_h = fuse_signal(model_prob_h, proc_h)
+            sltp_h = calc_sl_tp(proc_h.iloc[-1], side=fused_h["signal"] if fused_h["signal"] in ("BUY", "SELL") else "BUY")
             qty_h = position_size(sltp_h["entry"], sltp_h["sl"])
             hr_out = {**fused_h, **sltp_h, "qty": qty_h}
         except Exception as e:
-            print("⚠️ Hour pipeline error:", e)
-    combined = {"timestamp": datetime.now(timezone.utc).isoformat(), "daily": day_out, "hourly": hr_out}
+            print("⚠️ Hourly pipeline error:", e)
+
+    # === COMBINE OUTPUTS ===
+    combined = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "daily": day_out,
+        "hourly": hr_out
+    }
+
+    # Save latest signal file
     with open(SIGNALS_FILE, "w") as f:
         json.dump(combined, f, indent=2)
+
+    # Update signal history
     history = []
     if HISTORY_FILE.exists():
-        try: history = json.load(open(HISTORY_FILE))
-        except Exception: history = []
+        try:
+            history = json.load(open(HISTORY_FILE))
+        except Exception:
+            history = []
     history.append(combined)
     json.dump(history[-200:], open(HISTORY_FILE, "w"), indent=2)
-    print(f"[{combined['timestamp']}] Hourly:{hr_out['signal']}({hr_out.get('confidence',0)}%) Daily:{day_out['signal']}({day_out.get('confidence',0)}%)")
+
+    print(f"[{combined['timestamp']}] Hourly:{hr_out['signal']} ({hr_out.get('confidence', 0)}%) | "
+          f"Daily:{day_out['signal']} ({day_out.get('confidence', 0)}%)")
+
     return combined
 
 # -----------------------
