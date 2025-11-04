@@ -601,7 +601,7 @@ def build_train_and_signal():
 
     # === HOURLY DATA FETCH ===
     try:
-        hourly_df = fetch_twelvedata_xauusd_hourly(api_key=TWELVEDATA_KEY, total_records=100000)
+        hourly_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=100000)
         if hourly_df.empty:
             print("⚠️ Hourly TwelveData returned no data.")
         else:
