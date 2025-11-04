@@ -528,138 +528,40 @@ if HAS_RL:
         model.learn(total_timesteps=n_steps)
         model.save("ppo_agent")
         print("✅ RL agent trained & saved.")
-        return model
-
-# -----------------------
-# Flask app & routes
-# -----------------------
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return jsonify({
-        "status": "ok",
-        "time": datetime.now(timezone.utc).isoformat(),
-        "active_api_key_tail": ALPHAV_API_KEY[-4:],
-        "note": "AlphaVantage primary; Finnhub fallback (if available)."
-    })
-
+        return 
+# --------------------------
+# ✅ Flask routes section
+# --------------------------
 @app.route("/signal")
-def signal_route():
-    """
-    Returns the latest signal JSON. Contains:
-      - daily: { signal, confidence, entry, sl, tp, qty, annotations }
-      - hourly: same
-    """
-    if SIGNALS_FILE.exists():
-        try:
-            return jsonify(json.load(open(SIGNALS_FILE)))
-        except Exception:
-            pass
-    return jsonify(build_train_and_signal())
+def get_signal():
+    # your signal endpoint logic here
+    return jsonify(latest_signal_data)
 
-@app.route("/signal_url")
-def signal_url():
-    """Return the absolute URL to the /signal endpoint for linking from logs/dashboards."""
-    base = request.host_url.rstrip("/")
-    return jsonify({"signal_url": f"{base}/signal"})
 
-@app.route("/history")
-def history_route():
-    if HISTORY_FILE.exists():
-        try:
-            return jsonify(json.load(open(HISTORY_FILE)))
-        except Exception:
-            pass
-    return jsonify([])
-
-@app.route("/predict")
-def predict_route():
-    if not DAILY_FILE.exists():
-        return jsonify({"error": "no daily file"})
-    df = pd.read_csv(DAILY_FILE)
-    proc = compute_indicators(df.rename(columns={"Date":"Date","Open":"Open","High":"High","Low":"Low","Close":"Close","Volume":"Volume"}))
-    prob = ensemble_predict_proba(proc)
-    return jsonify({"proba_up": prob})
-
-@app.route("/backtest", methods=["POST"])
-def backtest_route():
-    payload = request.get_json() or {}
-    tf = payload.get("tf", "daily")
-    start = payload.get("from", None)
-    end = payload.get("to", None)
-    if tf == "hourly":
-        df = fetch_hourly()
-    else:
-        df = fetch_daily()
-    if df.empty: return jsonify({"error": "no data"})
-    df = df.copy()
-    if "Date" not in df.columns:
-        df["Date"] = pd.to_datetime(df.index)
-    else:
-        df["Date"] = pd.to_datetime(df["Date"])
-    if start: df = df[df["Date"] >= pd.to_datetime(start)]
-    if end: df = df[df["Date"] <= pd.to_datetime(end)]
-    proc = compute_indicators(df)
-    if proc.empty: return jsonify({"error":"no processed data"})
-    # simple walk-forward simulated trades
-    results = []
-    window = 200
-    for i in range(window, len(proc)-10, 10):
-        train = proc.iloc[:i]
-        test = proc.iloc[i:i+10]
-        try:
-            X = train[["ema8","ema21","ema50","atr14","rsi14","mom5","vol10"]]
-            y = (train["Close"].shift(-1) > train["Close"]).astype(int).shift(-1).fillna(0)
-            y = y[:-1]; X = X[:-1]
-            rf = RandomForestClassifier(n_estimators=50, random_state=42)
-            rf.fit(X, y)
-            last = test.iloc[0:1]
-            pred = rf.predict(last[["ema8","ema21","ema50","atr14","rsi14","mom5","vol10"]])[0]
-            side = "BUY" if pred == 1 else "SELL"
-            sltp = calc_sl_tp(last.iloc[0], side=side)
-            qty = max(1, position_size(sltp["entry"], sltp["sl"]))
-            sim = simulate_backtest(pd.concat([last, test]), entry_side=side, entry_index=0, sl=sltp["sl"], tp=sltp["tp"], qty=qty)
-            results.append(sim["pnl"])
-        except Exception:
-            continue
-    if not results:
-        return jsonify({"error": "no backtest trades"})
-    arr = np.array(results)
-    return jsonify({"trades": len(arr), "total_pnl": float(arr.sum()), "avg_pnl": float(arr.mean()), "winrate": float((arr>0).sum()/len(arr))})
-
-@app.route("/train_optuna", methods=["POST"])
-def train_optuna_route():
-    if not HAS_OPTUNA:
-        return jsonify({"error":"optuna not installed"})
-    n = int(request.get_json().get("n_trials", 20))
-    params = run_optuna_study(n_trials=n)
-    return jsonify({"best_params": params})
-
-@app.route("/train_rl", methods=["POST"])
-def train_rl_route():
-    if not HAS_RL:
-        return jsonify({"error":"stable-baselines3 or gym not installed"})
-    n_steps = int(request.get_json().get("n_steps", 50000))
-    res = train_rl_agent(n_steps=n_steps)
-    return jsonify({"status":"trained" if res else "failed"})
-
-# -----------------------
-# Background refresh
-# -----------------------
-def background_loop():
-    while True:
-        try:
-            build_train_and_signal()
-        except Exception as e:
-            print("Background loop error:", e)
-        time.sleep(REFRESH_INTERVAL_SECS)
-
-# -----------------------
-# Start server
-# -----------------------
+# ========================
+# Flask app startup block
+# ========================
 if __name__ == "__main__":
-    t = threading.Thread(target=background_loop, daemon=True)
-    t.start()
-    print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL_SECS}s (AlphaVantage keys rotated, Finnhub fallback enabled)")
+    print("📥 Fetching XAU/USD daily via FX_DAILY (AlphaVantage)...")
+    df, data = fetch_fx_daily_xauusd()
+
+    if df.empty:
+        print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
+        try:
+            td = TDClient(apikey=TWELVEDATA_KEY)
+            ts = td.time_series(symbol="XAU/USD", interval="1day", outputsize=30).as_json()
+            if isinstance(ts, list) and len(ts) > 0:
+                df = pd.DataFrame(ts)
+                df = df.rename(columns={"datetime": "Date", "open": "Open", "high": "High", "low": "Low", "close": "Close"})
+                df["Date"] = pd.to_datetime(df["Date"])
+                print(f"✅ TwelveData fallback succeeded with {len(df)} rows.")
+            else:
+                print("❌ TwelveData returned no usable data.")
+        except Exception as e:
+            print("❌ TwelveData fetch error:", e)
+
+    # refresh interval: 1 week (604800 seconds)
+    REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 604800))
+    print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL} seconds (AlphaVantage + TwelveData enabled)")
+
     app.run(host="0.0.0.0", port=PORT)
