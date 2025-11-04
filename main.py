@@ -617,10 +617,9 @@ def build_train_and_signal():
     # === DAILY MODEL PIPELINE ===
     if not daily_df.empty:
         try:
-            proc = compute_indicators(daily_df.rename(columns={
-                "Date": "Date", "Open": "Open", "High": "High",
-                "Low": "Low", "Close": "Close", "Volume": "Volume"
-            }))
+            daily_df.rename(columns=lambda x: x.capitalize(), inplace=True)
+            proc = compute_indicators(daily_df)
+            
             # Retrain every 3 days if model is older
             if not MODEL_PATH.exists() or (time.time() - MODEL_PATH.stat().st_mtime) > 86400 * 3:
                 print("🧠 Retraining ensemble model (daily)...")
@@ -637,10 +636,8 @@ def build_train_and_signal():
     # === HOURLY MODEL PIPELINE ===
     if not hourly_df.empty:
         try:
-            proc_h = compute_indicators(hourly_df.rename(columns={
-                "Date": "Date", "Open": "Open", "High": "High",
-                "Low": "Low", "Close": "Close", "Volume": "Volume"
-            }))
+            hourly_df.rename(columns=lambda x: x.capitalize(), inplace=True)
+            proc_h = compute_indicators(hourly_df)
             model_prob_h = ensemble_predict_proba(proc_h)
             fused_h = fuse_signal(model_prob_h, proc_h)
             sltp_h = calc_sl_tp(proc_h.iloc[-1], side=fused_h["signal"] if fused_h["signal"] in ("BUY", "SELL") else "BUY")
