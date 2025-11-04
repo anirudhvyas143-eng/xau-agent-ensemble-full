@@ -227,69 +227,69 @@ def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
     fn=HOURLY_FILE.parent/f"{symbol}_hourly.csv"; df.to_csv(fn,index=False)
     print(f"✅ Saved fallback hourly → {fn} ({len(df)})")
     return df, data
-    # ---------------------------------------------------------------------------------
-# Extended TwelveData fetcher (fetches up to 50,000 XAU/USD records)
+  # ---------------------------------------------------------------------------------
+# Extended TwelveData fetcher (up to 100,000 records using batching)
 # ---------------------------------------------------------------------------------
-def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=50000):
+def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
     """
-    Fetch extended XAU/USD data from TwelveData beyond 5000-record limit.
+    Fetch extended XAU/USD data from TwelveData beyond the 5,000-record limit
+    by batching multiple 5,000-record requests and merging results.
     """
     print(f"📡 Fetching up to {total_records} rows of {interval} data from TwelveData...")
 
     base_url = "https://api.twelvedata.com/time_series"
     end_date = datetime.utcnow()
     all_data = []
+    batch_size = 5000
+    batches = total_records // batch_size  # 100000 / 5000 = 20
 
-    # Each request = 5000 rows max → estimate time span based on interval
-    step_days = 5000 / 24 if interval == "1h" else 5000  # Rough spacing
+    # Estimate number of days each batch covers
+    if interval == "1h":
+        step_days = 5000 / 24  # ~208 days per batch
+    elif interval == "1day" or interval == "1D":
+        step_days = 5000       # 5000 days per batch
+    else:
+        step_days = 5000
 
-    while len(all_data) < total_records:
+    for i in range(batches):
         start_date = end_date - timedelta(days=step_days)
         params = {
             "symbol": "XAU/USD",
             "interval": interval,
             "apikey": api_key,
-            "outputsize": 5000,
+            "outputsize": batch_size,
             "start_date": start_date.strftime("%Y-%m-%d %H:%M:%S"),
             "end_date": end_date.strftime("%Y-%m-%d %H:%M:%S"),
         }
-        response = requests.get(base_url, params=params)
-        data = response.json().get("values", [])
-        if not data:
-            print("⚠️ No more data available or API limit reached.")
+
+        try:
+            response = requests.get(base_url, params=params)
+            response.raise_for_status()
+            json_data = response.json()
+            data = json_data.get("values", [])
+
+            if not data:
+                print(f"⚠️ Batch {i+1}: No more data available or API limit reached.")
+                break
+
+            all_data.extend(data)
+            print(f"✅ Batch {i+1}/{batches} complete — total {len(all_data)} rows collected.")
+            end_date = start_date  # move backward for next request
+            time.sleep(8)  # wait 8 seconds between batches (safe for free plan)
+
+        except Exception as e:
+            print(f"❌ Error in batch {i+1}: {e}")
             break
 
-        all_data.extend(data)
-        end_date = start_date  # Move backward in time
-        print(f"✅ Collected {len(all_data)} rows so far...")
-        time.sleep(1)  # avoid hitting TwelveData rate limit
+    if not all_data:
+        print("❌ No data fetched from TwelveData.")
+        return pd.DataFrame()
 
     df = pd.DataFrame(all_data)
     df["datetime"] = pd.to_datetime(df["datetime"])
     df = df.sort_values("datetime")
     print(f"🎯 Final merged dataset: {len(df)} rows of {interval} XAU/USD data.")
-
     return df
-
-def fetch_daily():
-    df,_=fetch_fx_daily_xauusd()
-    if df.empty:
-        df,_=fetch_symbol_daily_globaleq(SYMBOL_EQ)
-    if df.empty:
-        print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
-        # Use daily candles and request outputsize ~ 50000
-        df = fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=50000)
-    return df
-
-def fetch_hourly():
-    df,_=fetch_fx_intraday_xauusd()
-    if df.empty:
-        df,_=fetch_symbol_intraday_globaleq(SYMBOL_EQ)
-    if df.empty:
-        print("⚠️ AlphaVantage failed — trying TwelveData fallback (1h).")
-        df = fetch_from_twelvedata(symbol="XAU/USD", interval="1h", outputsize=50000)
-    return df
-
 # -----------------------
 # Indicators & features
 # -----------------------
@@ -674,7 +674,7 @@ if __name__ == "__main__":
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
         try:
-            td_df = fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=50000)
+           td_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
             if not td_df.empty:
                 print(f"✅ TwelveData fallback succeeded with {len(td_df)} rows.")
                 td_df.to_csv(DAILY_FILE, index=False)
