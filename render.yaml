@@ -26,7 +26,7 @@ services:
         value: 10000
 
       - key: REFRESH_INTERVAL_SECS
-  value: 86400
+  value: 604800
 
       - key: ALPHAV_API_KEY
         sync: false      # set your real AlphaVantage key(s) in code or dashboard
