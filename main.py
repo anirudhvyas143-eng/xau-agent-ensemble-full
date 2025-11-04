@@ -580,7 +580,9 @@ def simulate_backtest(df, entry_side="BUY", entry_index=None, sl=None, tp=None, 
     last_price = apply_slippage(float(df.iloc[-1]["Close"]), side="SELL" if entry_side=="BUY" else "BUY", bps=slippage_bps)
     pnl = (last_price - entry_price) * qty if entry_side == "BUY" else (entry_price - last_price) * qty
     return {"pnl": pnl, "exit_price": last_price, "index": len(df)-1, "reason": "HOLD"}
-
+# -----------------------
+# Build, train, and signal generator (with offline fallback)
+# -----------------------
 def build_train_and_signal():
     print("📊 Running build_train_and_signal() refresh...")
 
@@ -590,24 +592,28 @@ def build_train_and_signal():
         if daily_df.empty:
             print("⚠️ AlphaVantage DAILY failed — trying TwelveData fallback.")
             daily_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
+        if daily_df.empty:
+            print("⚠️ Daily TwelveData also failed — will use cached file if available.")
         else:
-            print(f"✅ DAILY data loaded from AlphaVantage: {len(daily_df)} rows")
+            daily_df.to_csv("daily.csv", index=False)
+            print(f"✅ DAILY data saved locally: {len(daily_df)} rows")
     except Exception as e:
         print("❌ Daily data fetch error:", e)
-        daily_df = pd.DataFrame()
+        daily_df = pd.read_csv("daily.csv") if os.path.exists("daily.csv") else pd.DataFrame()
 
     # === HOURLY DATA FETCH ===
     try:
         hourly_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=100000)
         if hourly_df.empty:
-            print("⚠️ Hourly TwelveData returned no data.")
+            print("⚠️ Hourly TwelveData returned no data — will use cached file if available.")
         else:
-            print(f"✅ HOURLY data loaded: {len(hourly_df)} rows")
+            hourly_df.to_csv("hourly.csv", index=False)
+            print(f"✅ HOURLY data saved locally: {len(hourly_df)} rows")
     except Exception as e:
         print("❌ Hourly data fetch error:", e)
-        hourly_df = pd.DataFrame()
+        hourly_df = pd.read_csv("hourly.csv") if os.path.exists("hourly.csv") else pd.DataFrame()
 
-    # === INITIAL OUTPUTS ===
+    # === SIGNAL GENERATION PIPELINE ===
     day_out = {"signal": "N/A", "confidence": 0}
     hr_out = {"signal": "N/A", "confidence": 0}
 
@@ -616,41 +622,83 @@ def build_train_and_signal():
         try:
             daily_df.rename(columns=lambda x: x.capitalize(), inplace=True)
             proc = compute_indicators(daily_df)
-            # Retrain every 3 days
+
+            # Retrain if model older than 3 days
             if not MODEL_PATH.exists() or (time.time() - MODEL_PATH.stat().st_mtime) > 86400 * 3:
                 print("🧠 Retraining ensemble model (daily)...")
                 train_ensemble(daily_df)
-            prob = ensemble_predict_proba(proc)
-            fused = fuse_signal(prob, proc)
-            fused["timeframe"] = "daily"
-            day_out = fused
-            print(f"📈 DAILY signal: {day_out}")
+
+            model_prob = ensemble_predict_proba(proc)
+            fused = fuse_signal(model_prob, proc)
+            sltp = calc_sl_tp(proc.iloc[-1], side=fused["signal"] if fused["signal"] in ("BUY", "SELL") else "BUY")
+            qty = position_size(sltp["entry"], sltp["sl"])
+            day_out = {**fused, **sltp, "qty": qty}
         except Exception as e:
-            print("❌ Daily signal error:", e)
+            print("⚠️ Daily pipeline error:", e)
 
     # === HOURLY MODEL PIPELINE ===
     if not hourly_df.empty:
         try:
             hourly_df.rename(columns=lambda x: x.capitalize(), inplace=True)
             proc_h = compute_indicators(hourly_df)
-            prob_h = ensemble_predict_proba(proc_h)
-            fused_h = fuse_signal(prob_h, proc_h)
-            fused_h["timeframe"] = "hourly"
-            hr_out = fused_h
-            print(f"⏱ HOURLY signal: {hr_out}")
+            model_prob_h = ensemble_predict_proba(proc_h)
+            fused_h = fuse_signal(model_prob_h, proc_h)
+            sltp_h = calc_sl_tp(proc_h.iloc[-1], side=fused_h["signal"] if fused_h["signal"] in ("BUY", "SELL") else "BUY")
+            qty_h = position_size(sltp_h["entry"], sltp_h["sl"])
+            hr_out = {**fused_h, **sltp_h, "qty": qty_h}
         except Exception as e:
-            print("❌ Hourly signal error:", e)
+            print("⚠️ Hourly pipeline error:", e)
 
-    # === SAVE & RETURN SIGNALS ===
-    result = {"daily": day_out, "hourly": hr_out, "time": datetime.utcnow().isoformat()}
-    try:
-        with open(SIGNALS_FILE, "w") as f:
-            json.dump(result, f, indent=2)
-        print(f"✅ Signals saved → {SIGNALS_FILE}")
-    except Exception as e:
-        print("❌ Failed to save signals:", e)
+    # === OFFLINE FALLBACK (when both APIs failed) ===
+    if daily_df.empty and hourly_df.empty:
+        print("⚡ Using offline cached data and saved ensemble model for signal regeneration...")
+        if os.path.exists("ensemble_model.pkl"):
+            with open("ensemble_model.pkl", "rb") as f:
+                ensemble = pickle.load(f)
+            if os.path.exists("daily.csv") and os.path.exists("hourly.csv"):
+                daily_df = pd.read_csv("daily.csv")
+                hourly_df = pd.read_csv("hourly.csv")
 
-    return result
+                proc_d = compute_indicators(daily_df)
+                prob_d = ensemble_predict_proba(proc_d)
+                fused_d = fuse_signal(prob_d, proc_d)
+
+                proc_h = compute_indicators(hourly_df)
+                prob_h = ensemble_predict_proba(proc_h)
+                fused_h = fuse_signal(prob_h, proc_h)
+
+                day_out = fused_d
+                hr_out = fused_h
+                print(f"✅ Offline signal regeneration complete — Daily:{day_out['signal']} | Hourly:{hr_out['signal']}")
+            else:
+                print("⚠️ No cached CSV data found for offline regeneration.")
+        else:
+            print("⚠️ No saved ensemble model found — cannot regenerate offline signals.")
+
+    # === SAVE & LOG RESULTS ===
+    combined = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "daily": day_out,
+        "hourly": hr_out
+    }
+
+    with open(SIGNALS_FILE, "w") as f:
+        json.dump(combined, f, indent=2)
+
+    history = []
+    if HISTORY_FILE.exists():
+        try:
+            history = json.load(open(HISTORY_FILE))
+        except Exception:
+            history = []
+    history.append(combined)
+    json.dump(history[-200:], open(HISTORY_FILE, "w"), indent=2)
+
+    print(f"[{combined['timestamp']}] Hourly:{hr_out['signal']} ({hr_out.get('confidence', 0)}%) | "
+          f"Daily:{day_out['signal']} ({day_out.get('confidence', 0)}%)")
+
+    return combined
+
 # -----------------------
 # Flask routes
 # -----------------------
