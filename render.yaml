@@ -25,9 +25,8 @@ services:
       - key: PORT
         value: 10000
 
-      # 3 hours = 10800 seconds (so 8 API calls per 24 hours)
       - key: REFRESH_INTERVAL_SECS
-        value: 10800
+  value: 86400
 
       - key: ALPHAV_API_KEY
         sync: false      # set your real AlphaVantage key(s) in code or dashboard
