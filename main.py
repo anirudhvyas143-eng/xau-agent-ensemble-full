@@ -729,16 +729,24 @@ if __name__ == "__main__":
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
         try:
-           td_df = fetch_twelvedata_xauusd_hourly(api_key=TWELVEDATA_KEY, total_records=100000)
-           td_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
-            if not td_df.empty:
-                print(f"✅ TwelveData fallback succeeded with {len(td_df)} rows.")
-                td_df.to_csv(DAILY_FILE, index=False)
-                df = td_df
+            # Fetch both hourly and daily backups from TwelveData
+            td_hourly = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=100000)
+            td_daily = fetch_twelvedata_xauusd_daily(api_key=TWELVEDATA_KEY, total_records=100000)
+
+            # Prefer daily data for main file
+            if not td_daily.empty:
+                print(f"✅ TwelveData DAILY fallback succeeded with {len(td_daily)} rows.")
+                td_daily.to_csv(DAILY_FILE, index=False)
+                df = td_daily
+            elif not td_hourly.empty:
+                print(f"✅ TwelveData HOURLY fallback succeeded with {len(td_hourly)} rows.")
+                td_hourly.to_csv(DAILY_FILE, index=False)
+                df = td_hourly
             else:
-                print("❌ TwelveData returned no usable data.")
+                print("❌ TwelveData returned no usable data at all.")
+
         except Exception as e:
-            print("❌ TwelveData fetch error:", e)
+            print(f"❌ TwelveData fetch error: {e}")
 
     print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL} seconds (AlphaVantage + TwelveData enabled)")
 
