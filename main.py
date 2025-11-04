@@ -674,7 +674,7 @@ if __name__ == "__main__":
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
         try:
-            td_df = fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=30)
+            td_df = fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=50000)
             if not td_df.empty:
                 print(f"✅ TwelveData fallback succeeded with {len(td_df)} rows.")
                 td_df.to_csv(DAILY_FILE, index=False)
