@@ -799,6 +799,6 @@ if __name__ == "__main__":
     print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL} seconds (AlphaVantage + TwelveData enabled)")
     
   t = threading.Thread(target=background_loop, daemon=True)
-t.start()
+  t.start()
 
     app.run(host="0.0.0.0", port=PORT)
