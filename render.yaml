@@ -1,6 +1,3 @@
-# =========================================================
-# ✅ RENDER DEPLOY CONFIGURATION (render.yaml)
-# =========================================================
 services:
   - type: web
     name: xauusd-ai-trader
@@ -24,13 +21,11 @@ services:
     envVars:
       - key: PORT
         value: 10000
-
       - key: REFRESH_INTERVAL_SECS
-  value: 604800
-
+        value: 604800          # 7 days in seconds
       - key: ALPHAV_API_KEY
-        sync: false      # set your real AlphaVantage key(s) in code or dashboard
+        sync: false
       - key: TWELVEDATA_API_KEY
-        sync: false      # set Twelve Data key here
+        sync: false
       - key: SELF_PING_URL
         value: https://xauusd-ai-trader.onrender.com/signal
