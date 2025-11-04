@@ -9,6 +9,7 @@ import requests, pandas as pd, numpy as np, joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from flask import Flask, jsonify, request
+import schedule
 
 # optional libs
 try: import lightgbm as lgb; HAS_LGB=True
