@@ -9,7 +9,8 @@ import requests, pandas as pd, numpy as np, joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from flask import Flask, jsonify, request
-
+from datetime import datetime, timedelta
+import time
 app = Flask(__name__)
 
 # optional libs
@@ -191,7 +192,7 @@ def fetch_fx_daily_xauusd():
 
 def fetch_fx_intraday_xauusd():
     print("📥 Fetching XAU/USD hourly via FX_INTRADAY 60min...")
-    params={"function":"FX_INTRADAY","from_symbol":SYMBOL_FX[0],"to_symbol":SYMBOL_FX[1],"interval":"60min","outputsize":"compact"}
+    params={"function":"FX_INTRADAY","from_symbol":SYMBOL_FX[0],"to_symbol":SYMBOL_FX[1],"interval":"60min","outputsize":"full"}
     data=try_alpha_request(params)
     if not data or "Time Series FX (60min)" not in data: return pd.DataFrame(), data
     df=pd.DataFrame.from_dict(data["Time Series FX (60min)"], orient="index")
@@ -216,7 +217,7 @@ def fetch_symbol_daily_globaleq(symbol=SYMBOL_EQ):
 
 def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
     print(f"📥 Fetching {symbol} hourly via TIME_SERIES_INTRADAY...")
-    params={"function":"TIME_SERIES_INTRADAY","symbol":symbol,"interval":"60min","outputsize":"compact"}
+    params={"function":"TIME_SERIES_INTRADAY","symbol":symbol,"interval":"60min","outputsize":"full"}
     data=try_alpha_request(params)
     if not data or "Time Series (60min)" not in data: return pd.DataFrame(), data
     df=pd.DataFrame.from_dict(data["Time Series (60min)"], orient="index")
@@ -226,6 +227,49 @@ def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
     fn=HOURLY_FILE.parent/f"{symbol}_hourly.csv"; df.to_csv(fn,index=False)
     print(f"✅ Saved fallback hourly → {fn} ({len(df)})")
     return df, data
+    # ---------------------------------------------------------------------------------
+# Extended TwelveData fetcher (fetches up to 50,000 XAU/USD records)
+# ---------------------------------------------------------------------------------
+def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=50000):
+    """
+    Fetch extended XAU/USD data from TwelveData beyond 5000-record limit.
+    """
+    print(f"📡 Fetching up to {total_records} rows of {interval} data from TwelveData...")
+
+    base_url = "https://api.twelvedata.com/time_series"
+    end_date = datetime.utcnow()
+    all_data = []
+
+    # Each request = 5000 rows max → estimate time span based on interval
+    step_days = 5000 / 24 if interval == "1h" else 5000  # Rough spacing
+
+    while len(all_data) < total_records:
+        start_date = end_date - timedelta(days=step_days)
+        params = {
+            "symbol": "XAU/USD",
+            "interval": interval,
+            "apikey": api_key,
+            "outputsize": 5000,
+            "start_date": start_date.strftime("%Y-%m-%d %H:%M:%S"),
+            "end_date": end_date.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        response = requests.get(base_url, params=params)
+        data = response.json().get("values", [])
+        if not data:
+            print("⚠️ No more data available or API limit reached.")
+            break
+
+        all_data.extend(data)
+        end_date = start_date  # Move backward in time
+        print(f"✅ Collected {len(all_data)} rows so far...")
+        time.sleep(1)  # avoid hitting TwelveData rate limit
+
+    df = pd.DataFrame(all_data)
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    df = df.sort_values("datetime")
+    print(f"🎯 Final merged dataset: {len(df)} rows of {interval} XAU/USD data.")
+
+    return df
 
 def fetch_daily():
     df,_=fetch_fx_daily_xauusd()
@@ -233,8 +277,8 @@ def fetch_daily():
         df,_=fetch_symbol_daily_globaleq(SYMBOL_EQ)
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
-        # Use daily candles and request outputsize ~ 30 days
-        df = fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=30)
+        # Use daily candles and request outputsize ~ 50000
+        df = fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=50000)
     return df
 
 def fetch_hourly():
@@ -243,7 +287,7 @@ def fetch_hourly():
         df,_=fetch_symbol_intraday_globaleq(SYMBOL_EQ)
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback (1h).")
-        df = fetch_from_twelvedata(symbol="XAU/USD", interval="1h", outputsize=100)
+        df = fetch_from_twelvedata(symbol="XAU/USD", interval="1h", outputsize=50000)
     return df
 
 # -----------------------
