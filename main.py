@@ -773,21 +773,28 @@ def background_loop():
 # Start server
 # -----------------------
 if __name__ == "__main__":
-    # First attempt to fetch immediately so logs show what happened
-    print("📥 Fetching XAU/USD daily via FX_DAILY (AlphaVantage)...")
-    df, data = fetch_fx_daily_xauusd()
+    # ✅ Resume from cached data if available
+    if DAILY_FILE.exists() and HOURLY_FILE.exists():
+        try:
+            print("🔄 Cached data found — resuming from saved CSVs...")
+            df = pd.read_csv(DAILY_FILE)
+            hf = pd.read_csv(HOURLY_FILE)
+            print(f"✅ Loaded cached daily ({len(df)}) and hourly ({len(hf)}) rows.")
+        except Exception as e:
+            print("⚠️ Cache load failed, refetching...", e)
+            df, data = fetch_fx_daily_xauusd()
+    else:
+        print("📥 No cached data found — fetching fresh data...")
+        df, data = fetch_fx_daily_xauusd()
+
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
         try:
-            # Fetch hourly and daily data from TwelveData
             td_hourly = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=100000)
             td_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
 
-            # ✅ Normalize column names (capitalize first letter)
             if not td_df.empty:
                 td_df.rename(columns=lambda x: x.capitalize(), inplace=True)
-
-            if not td_df.empty:
                 print(f"✅ TwelveData DAILY fallback succeeded with {len(td_df)} rows.")
                 td_df.to_csv(DAILY_FILE, index=False)
                 df = td_df
@@ -797,8 +804,9 @@ if __name__ == "__main__":
             print("❌ TwelveData fetch error:", e)
 
     print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL} seconds (AlphaVantage + TwelveData enabled)")
-    
-  t = threading.Thread(target=background_loop, daemon=True)
-  t.start()
+
+    # ✅ Start background loop safely
+    t = threading.Thread(target=background_loop, daemon=True)
+    t.start()
 
     app.run(host="0.0.0.0", port=PORT)
