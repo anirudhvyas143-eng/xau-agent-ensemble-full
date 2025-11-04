@@ -226,14 +226,15 @@ def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
     df=df.sort_values("Date")
     fn=HOURLY_FILE.parent/f"{symbol}_hourly.csv"; df.to_csv(fn,index=False)
     print(f"✅ Saved fallback hourly → {fn} ({len(df)})")
-    return df, data
-  # ---------------------------------------------------------------------------------
-# Extended TwelveData fetcher (up to 100,000 records using batching)
+    return df
+    # ---------------------------------------------------------------------------------
+# Extended TwelveData Hourly Fetcher (up to 100,000 records using batching)
 # ---------------------------------------------------------------------------------
 def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
     """
-    Fetch extended XAU/USD data from TwelveData beyond the 5,000-record limit
+    Fetch extended XAU/USD hourly data from TwelveData beyond 5,000-record limit
     by batching multiple 5,000-record requests and merging results.
+    Works safely on TwelveData free (Trial) plan.
     """
     print(f"📡 Fetching up to {total_records} rows of {interval} data from TwelveData...")
 
@@ -241,15 +242,10 @@ def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
     end_date = datetime.utcnow()
     all_data = []
     batch_size = 5000
-    batches = total_records // batch_size  # 100000 / 5000 = 20
+    batches = total_records // batch_size  # e.g., 100000 / 5000 = 20
 
-    # Estimate number of days each batch covers
-    if interval == "1h":
-        step_days = 5000 / 24  # ~208 days per batch
-    elif interval == "1day" or interval == "1D":
-        step_days = 5000       # 5000 days per batch
-    else:
-        step_days = 5000
+    # ~208 days per batch for 1h data
+    step_days = 5000 / 24 if interval == "1h" else 5000
 
     for i in range(batches):
         start_date = end_date - timedelta(days=step_days)
@@ -274,8 +270,8 @@ def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
 
             all_data.extend(data)
             print(f"✅ Batch {i+1}/{batches} complete — total {len(all_data)} rows collected.")
-            end_date = start_date  # move backward for next request
-            time.sleep(8)  # wait 8 seconds between batches (safe for free plan)
+            end_date = start_date  # move backward in time
+            time.sleep(8)  # safe delay for TwelveData free plan (8 req/min)
 
         except Exception as e:
             print(f"❌ Error in batch {i+1}: {e}")
@@ -290,52 +286,64 @@ def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
     df = df.sort_values("datetime")
     print(f"🎯 Final merged dataset: {len(df)} rows of {interval} XAU/USD data.")
     return df
-  # ---------------------------------------------------------------------------------
-# Extended TwelveData Daily Fetcher (fetches up to 100,000 XAU/USD daily candles)
+
+
+# ---------------------------------------------------------------------------------
+# Extended TwelveData Daily Fetcher (up to 100,000 daily candles)
 # ---------------------------------------------------------------------------------
 def fetch_twelvedata_xauusd_daily(api_key, total_records=100000):
     """
-    Fetch extended XAU/USD daily data from TwelveData beyond 5000-record limit.
+    Fetch extended XAU/USD daily candles from TwelveData beyond 5,000-record limit.
+    Works safely even on TwelveData free plan.
     """
     print(f"📡 Fetching up to {total_records} rows of DAILY data from TwelveData...")
 
     base_url = "https://api.twelvedata.com/time_series"
     end_date = datetime.utcnow()
     all_data = []
+    batch_size = 5000
+    batches = total_records // batch_size  # 20 batches for 100k
 
-    # Each request = 5000 rows max → each batch ~5000 days
-    step_days = 5000  
+    step_days = 5000  # each batch = ~5000 days
 
-    while len(all_data) < total_records:
+    for i in range(batches):
         start_date = end_date - timedelta(days=step_days)
         params = {
             "symbol": "XAU/USD",
             "interval": "1day",
             "apikey": api_key,
-            "outputsize": 5000,
+            "outputsize": batch_size,
             "start_date": start_date.strftime("%Y-%m-%d"),
             "end_date": end_date.strftime("%Y-%m-%d"),
         }
 
-        response = requests.get(base_url, params=params)
-        data = response.json().get("values", [])
-        if not data:
-            print("⚠️ No more data available or API limit reached.")
+        try:
+            response = requests.get(base_url, params=params)
+            response.raise_for_status()
+            json_data = response.json()
+            data = json_data.get("values", [])
+
+            if not data:
+                print(f"⚠️ Batch {i+1}: No more data available or API limit reached.")
+                break
+
+            all_data.extend(data)
+            print(f"✅ Batch {i+1}/{batches} complete — total {len(all_data)} rows collected.")
+            end_date = start_date
+            time.sleep(8)  # ⏳ safe delay for free plan (8 req/min)
+
+        except Exception as e:
+            print(f"❌ Error in batch {i+1}: {e}")
             break
 
-        all_data.extend(data)
-        end_date = start_date
-        print(f"✅ Collected {len(all_data)} rows so far...")
-        time.sleep(8)  # ⏳ safe delay for free plan
+    if not all_data:
+        print("❌ No daily data fetched from TwelveData.")
+        return pd.DataFrame()
 
     df = pd.DataFrame(all_data)
-    if not df.empty:
-        df["datetime"] = pd.to_datetime(df["datetime"])
-        df = df.sort_values("datetime")
-        print(f"🎯 Final merged dataset: {len(df)} DAILY candles of XAU/USD.")
-    else:
-        print("⚠️ No data received from TwelveData.")
-
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    df = df.sort_values("datetime")
+    print(f"🎯 Final merged dataset: {len(df)} DAILY candles of XAU/USD.")
     return df
 # -----------------------
 # Indicators & features
