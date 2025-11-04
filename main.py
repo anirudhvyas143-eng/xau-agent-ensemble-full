@@ -9,7 +9,6 @@ import requests, pandas as pd, numpy as np, joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from flask import Flask, jsonify, request
-import schedule
 
 # optional libs
 try: import lightgbm as lgb; HAS_LGB=True
@@ -52,7 +51,6 @@ SYMBOL_FX = ("XAU", "USD")
 SYMBOL_EQ = "GLD"
 
 REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL_SECS", 86400))
-schedule.every(REFRESH_INTERVAL).seconds.do(fetch_and_update_signals)
 PORT = int(os.getenv("PORT", 10000))
 VP_BINS = int(os.getenv("VP_BINS", 24))
 FVG_LOOKBACK = int(os.getenv("FVG_LOOKBACK", 3))
