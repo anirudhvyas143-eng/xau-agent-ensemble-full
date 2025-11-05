@@ -816,7 +816,31 @@ def refresh_signal():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+     # Force daily-only signal generation
+from build import build_train_and_signal, generate_signals_daily_only
+
+# Instead of calling full build_train_and_signal(), call:
+generate_signals_daily_only()   
 # -----------------------
+import pandas as pd
+import joblib  # or pickle depending on how you save your model
+
+def generate_signals_daily_only():
+    # Load daily CSV
+    daily_df = pd.read_csv("daily.csv")  # your saved daily data
+
+    # Load trained daily ensemble
+    model = joblib.load("ensemble_daily.pkl")  # adjust filename if different
+
+    # Prepare features (example, adjust to your features)
+    X = daily_df[['feature1','feature2','feature3','feature4','feature5','feature6','feature7']]
+
+    # Predict
+    daily_df['signal'] = model.predict(X)
+
+    # Save signals
+    daily_df.to_csv("daily_signals.csv", index=False)
+    print("✅ Daily signals generated and saved to daily_signals.csv")
 # Background refresh (run once)
 # -----------------------
 def background_loop():
