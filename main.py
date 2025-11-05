@@ -785,7 +785,37 @@ def backtest_route():
         return jsonify({"error": "no backtest trades"})
     arr = np.array(results)
     return jsonify({"trades": len(arr), "total_pnl": float(arr.sum()), "avg_pnl": float(arr.mean()), "winrate": float((arr>0).sum()/len(arr))})
+@app.route("/signal/refresh", methods=["POST"])
+def refresh_signal():
+    """
+    Reload saved datasets and re-generate ensemble signals manually.
+    """
+    try:
+        import pandas as pd
+        from ensemble_model import generate_ensemble_signal  # make sure this function exists
 
+        # Load your saved CSVs
+        daily = pd.read_csv("daily.csv")
+        hourly = pd.read_csv("hourly.csv")
+
+        # Generate signals
+        daily_signal = generate_ensemble_signal(daily, timeframe="daily")
+        hourly_signal = generate_ensemble_signal(hourly, timeframe="hourly")
+
+        # Save to signals.json
+        import json, datetime
+        signal_data = {
+            "daily": daily_signal,
+            "hourly": hourly_signal,
+            "time": datetime.datetime.utcnow().isoformat()
+        }
+        with open("signals.json", "w") as f:
+            json.dump(signal_data, f, indent=2)
+
+        return jsonify({"status": "✅ Signal regenerated", "data": signal_data}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # -----------------------
 # Background refresh (run once)
 # -----------------------
