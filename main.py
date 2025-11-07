@@ -57,8 +57,18 @@ TWELVEDATA_KEY = os.getenv("TWELVEDATA_KEY", "daf266a898fd450caed947b15cfba53e")
 SYMBOL_FX = ("XAU", "USD")
 SYMBOL_EQ = "GLD"
 
-# 1 week in seconds
-REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 7 * 24 * 60 * 60))
+
+# -------------------------
+# Auto-refresh loop (every 24h)
+# -------------------------
+while True:
+    try:
+        print("🔄 Auto-refreshing signals (daily)...")
+        refresh_signals()
+        print("✅ Daily signal refresh completed. Waiting 24h...")
+    except Exception as e:
+        print(f"⚠️ Auto-refresh error: {e}")
+    time.sleep(86400)  # wait 24 hours before next refresh
 PORT = int(os.getenv("PORT", 10000))
 VP_BINS = int(os.getenv("VP_BINS", 24))
 FVG_LOOKBACK = int(os.getenv("FVG_LOOKBACK", 3))
@@ -228,7 +238,7 @@ def fetch_symbol_intraday_globaleq(symbol=SYMBOL_EQ):
     print(f"✅ Saved fallback hourly → {fn} ({len(df)})")
     return df
     # ---------------------------------------------------------------------------------
-# Extended TwelveData Hourly Fetcher (up to 100,000 records using batching)
+# Extended TwelveData Hourly Fetcher (up to 35000 records using batching)
 # ---------------------------------------------------------------------------------
 def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
     """
@@ -289,7 +299,7 @@ def fetch_twelvedata_xauusd(api_key, interval="1h", total_records=100000):
 
 
 # ---------------------------------------------------------------------------------
-# Extended TwelveData Daily Fetcher (up to 100,000 daily candles)
+# Extended TwelveData Daily Fetcher (up to 35000daily candles)
 # ---------------------------------------------------------------------------------
 def fetch_twelvedata_xauusd_daily(api_key, total_records=100000):
     """
@@ -302,7 +312,7 @@ def fetch_twelvedata_xauusd_daily(api_key, total_records=100000):
     end_date = datetime.utcnow()
     all_data = []
     batch_size = 5000
-    batches = total_records // batch_size  # 20 batches for 100k
+    batches = total_records // batch_size  # 13 batches
 
     step_days = 5000  # each batch = ~5000 days
 
@@ -591,7 +601,7 @@ def build_train_and_signal():
         daily_df, _ = fetch_fx_daily_xauusd()
         if daily_df.empty:
             print("⚠️ AlphaVantage DAILY failed — trying TwelveData fallback.")
-            daily_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
+            daily_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=12000)
         if daily_df.empty:
             print("⚠️ Daily TwelveData also failed — will use cached file if available.")
         else:
@@ -603,7 +613,7 @@ def build_train_and_signal():
 
     # === HOURLY DATA FETCH ===
     try:
-        hourly_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=100000)
+        hourly_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=35000)
         if hourly_df.empty:
             print("⚠️ Hourly TwelveData returned no data — will use cached file if available.")
         else:
@@ -786,14 +796,17 @@ def backtest_route():
     arr = np.array(results)
     return jsonify({"trades": len(arr), "total_pnl": float(arr.sum()), "avg_pnl": float(arr.mean()), "winrate": float((arr>0).sum()/len(arr))})
 @app.route("/signal/refresh", methods=["POST"])
-def refresh_signal():
-    """
-    Reload saved datasets and re-generate ensemble signals manually.
-    """
+# -------------------------
+# Auto-refresh loop (every 24h)
+# -------------------------
+while True:
     try:
-        import pandas as pd
-        from ensemble_model import generate_ensemble_signal  # make sure this function exists
-
+        print("🔄 Auto-refreshing signals (daily)...")
+        refresh_signals()
+        print("✅ Daily signal refresh completed. Waiting 24h...")
+    except Exception as e:
+        print(f"⚠️ Auto-refresh error: {e}")
+    time.sleep(86400)  # wait 24 hours before next refresh
         # Load your saved CSVs
         daily = pd.read_csv("daily.csv")
         hourly = pd.read_csv("hourly.csv")
@@ -871,8 +884,8 @@ if __name__ == "__main__":
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
         try:
-            td_hourly = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=100000)
-            td_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=100000)
+            td_hourly = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=35000)
+            td_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=12000)
 
             if not td_df.empty:
                 td_df.rename(columns=lambda x: x.capitalize(), inplace=True)
