@@ -1646,11 +1646,11 @@ def backtest_route():
 while True:
     try:
         print("🔄 Auto-refreshing signals (daily)...")
+        
+        # Refresh signals
         refresh_signals()
         print("✅ Daily signal refresh completed. Waiting 24h...")
-    except Exception as e:
-        print(f"⚠️ Auto-refresh error: {e}")
-    time.sleep(86400)  # wait 24 hours before next refresh
+
         # Load your saved CSVs
         daily = pd.read_csv("daily.csv")
         hourly = pd.read_csv("hourly.csv")
@@ -1669,35 +1669,11 @@ while True:
         with open("signals.json", "w") as f:
             json.dump(signal_data, f, indent=2)
 
-        return jsonify({"status": "✅ Signal regenerated", "data": signal_data}), 200
-
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-     # Force daily-only signal generation
-from build import build_train_and_signal, generate_signals_daily_only
+        print(f"⚠️ Auto-refresh error: {e}")
 
-# Instead of calling full build_train_and_signal(), call:
-generate_signals_daily_only()   
-# -----------------------
-import pandas as pd
-import joblib  # or pickle depending on how you save your model
-
-def generate_signals_daily_only():
-    # Load daily CSV
-    daily_df = pd.read_csv("daily.csv")  # your saved daily data
-
-    # Load trained daily ensemble
-    model = joblib.load("ensemble_daily.pkl")  # adjust filename if different
-
-    # Prepare features (example, adjust to your features)
-    X = daily_df[['feature1','feature2','feature3','feature4','feature5','feature6','feature7']]
-
-    # Predict
-    daily_df['signal'] = model.predict(X)
-
-    # Save signals
-    daily_df.to_csv("daily_signals.csv", index=False)
-    print("✅ Daily signals generated and saved to daily_signals.csv")
+    # wait 24 hours before next refresh
+    time.sleep(86400)
 # Background refresh (run once)
 # -----------------------
 def background_loop():
