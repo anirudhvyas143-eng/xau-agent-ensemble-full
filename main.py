@@ -1728,8 +1728,12 @@ if __name__ == "__main__":
     if df.empty:
         print("⚠️ AlphaVantage failed — trying TwelveData fallback.")
         try:
-            td_hourly = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1h", total_records=35000)
-            td_df = fetch_twelvedata_xauusd(api_key=TWELVEDATA_KEY, interval="1day", total_records=12000)
+            td_hourly = fetch_twelvedata_xauusd(
+                api_key=TWELVEDATA_KEY, interval="1h", total_records=35000
+            )
+            td_df = fetch_twelvedata_xauusd(
+                api_key=TWELVEDATA_KEY, interval="1day", total_records=12000
+            )
 
             if not td_df.empty:
                 td_df.rename(columns=lambda x: x.capitalize(), inplace=True)
@@ -1741,7 +1745,10 @@ if __name__ == "__main__":
         except Exception as e:
             print("❌ TwelveData fetch error:", e)
 
-    print(f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL} seconds (AlphaVantage + TwelveData enabled)")
+    print(
+        f"🚀 Starting Flask on port {PORT} | Refresh every {REFRESH_INTERVAL} seconds "
+        "(AlphaVantage + TwelveData enabled)"
+    )
 
     # ✅ Start background loop safely
     t = threading.Thread(target=background_loop, daemon=True)
