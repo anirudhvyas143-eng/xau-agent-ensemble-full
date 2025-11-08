@@ -88,7 +88,7 @@ def try_alpha_request(params):
     return {}
 
 # ---------------- TwelveData fallback (robust) ----------------
-def fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=30):
+def fetch_from_twelvedata(symbol="XAU/USD", interval="1day", outputsize=12000):
     """
     Try SDK -> REST fallback. Returns DataFrame or empty DataFrame.
     Handles different return shapes from SDK and REST.
